@@ -161,16 +161,22 @@ struct SyncView: View {
     }
 
     private func execute(_ plan: SyncPlanner.Plan) async {
+        await Notifier.requestAuthorization()
         // 削除を先に済ませてから転送を待ち行列に入れる
+        var deleteFailures = 0
         for deletion in plan.deletions {
             if direction == .upload, let client = session.remote.client {
                 let path = RemotePath.join(remoteRoot, deletion.relativePath)
                 let item = RemoteItem(name: RemotePath.name(of: path), path: path,
                                       kind: deletion.isDirectory ? .directory : .file)
-                try? await client.deleteRecursively(item)
+                do { try await client.deleteRecursively(item) } catch { deleteFailures += 1 }
             } else if direction == .download {
-                try? FileManager.default.trashItem(at: localRoot.appendingPathComponent(deletion.relativePath),
-                                                   resultingItemURL: nil)
+                do {
+                    try FileManager.default.trashItem(at: localRoot.appendingPathComponent(deletion.relativePath),
+                                                      resultingItemURL: nil)
+                } catch {
+                    deleteFailures += 1
+                }
             }
         }
 
@@ -186,5 +192,32 @@ struct SyncView: View {
             await session.remote.refresh()
         }
         dismiss()
+
+        // 画面を閉じた後も転送の完了を待って通知する
+        let serverName = session.server.name
+        let direction = direction
+        let deletionCount = plan.deletions.count - deleteFailures
+        Task { @MainActor in
+            for item in items {
+                await item.waitUntilDone()
+            }
+            notifyFinished(serverName: serverName, direction: direction, items: items,
+                           deletionCount: deletionCount, deleteFailures: deleteFailures)
+        }
+    }
+
+    private func notifyFinished(serverName: String, direction: TransferItem.Direction, items: [TransferItem],
+                                deletionCount: Int, deleteFailures: Int) {
+        let finished = items.filter { $0.state == .finished }.count
+        let failed = items.filter { if case .failed = $0.state { true } else { false } }.count + deleteFailures
+        let cancelled = items.filter { $0.state == .cancelled }.count
+
+        var parts = ["\(direction == .upload ? "アップロード" : "ダウンロード") \(finished) 件"]
+        if deletionCount > 0 { parts.append("削除 \(deletionCount) 件") }
+        if failed > 0 { parts.append("失敗 \(failed) 件") }
+        if cancelled > 0 { parts.append("中止 \(cancelled) 件") }
+
+        let title = failed > 0 ? "同期が終わりました（失敗あり）" : "同期が完了しました"
+        Notifier.post(title: title, body: "\(serverName)：" + parts.joined(separator: "、"))
     }
 }

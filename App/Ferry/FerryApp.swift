@@ -9,6 +9,7 @@ struct FerryApp: App {
         let store = ServerStore()
         _store = State(initialValue: store)
         _sessions = State(initialValue: SessionManager(store: store))
+        Notifier.setUp()
     }
 
     var body: some Scene {
