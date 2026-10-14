@@ -3,6 +3,8 @@
 set -e
 cd "$(dirname "$0")"
 xcodegen generate -q
+# 前回同梱したライブラリが残らないよう、ビルド済みのアプリを消してから作り直す
+rm -rf build/Build/Products/Release/Ferry.app
 xcodebuild -project Ferry.xcodeproj -scheme Ferry -configuration Release -derivedDataPath build build -quiet
 # Homebrew の無い Mac でも動くよう libcurl などを同梱する
 Tools/bundle-libs.sh build/Build/Products/Release/Ferry.app "Apple Development"
