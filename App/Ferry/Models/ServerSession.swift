@@ -22,6 +22,8 @@ final class ServerSession {
     let transfers: TransferQueue
     @ObservationIgnored private(set) var editWatcher: EditWatcher!
     private(set) var status: Status = .idle
+    /// 接続後に開くブックマーク（サイドバーから「〜で接続」を選んだときなど）
+    @ObservationIgnored var pendingBookmark: PaneBookmark?
     /// 編集用にダウンロード中のファイル名
     private(set) var openingForEdit: String?
     @ObservationIgnored private let transferClient: RemoteClient
@@ -58,7 +60,12 @@ final class ServerSession {
         }
         status = .connecting
 
-        if local.path.isEmpty {
+        // 接続時に開くブックマーク（サイドバーから選んだもの、なければ接続先の設定）
+        let bookmark = pendingBookmark ?? (local.path.isEmpty ? server.startBookmark : nil)
+        pendingBookmark = nil
+        if let bookmark {
+            await local.load(bookmark.localPath, recordHistory: false)
+        } else if local.path.isEmpty {
             let localPath = server.localPath.map { ($0 as NSString).expandingTildeInPath }
                 ?? FileManager.default.homeDirectoryForCurrentUser.path
             await local.load(localPath, recordHistory: false)
@@ -67,7 +74,7 @@ final class ServerSession {
         do {
             // ログインの確認を兼ねてホームを取得する
             let home = try await client.homeDirectory()
-            let start = server.initialPath.flatMap { $0.isEmpty ? nil : $0 } ?? home
+            let start = bookmark?.remotePath ?? server.initialPath.flatMap { $0.isEmpty ? nil : $0 } ?? home
             await remote.load(start, recordHistory: false)
             if let message = remote.errorMessage, remote.entries.isEmpty {
                 status = .failed(message)
@@ -95,8 +102,12 @@ final class ServerSession {
         await connect()
     }
 
-    /// ブックマークした組み合わせを左右のペインで開く
+    /// ブックマークした組み合わせを左右のペインで開く。未接続なら接続後に開く。
     func open(_ bookmark: PaneBookmark) async {
+        guard status == .connected else {
+            pendingBookmark = bookmark
+            return
+        }
         await local.load(bookmark.localPath)
         await remote.load(bookmark.remotePath)
     }
@@ -247,6 +258,8 @@ extension ServerConfig {
         b.folderID = nil
         a.bookmarks = nil
         b.bookmarks = nil
+        a.startBookmarkID = nil
+        b.startBookmarkID = nil
         a.name = ""
         b.name = ""
         return a == b

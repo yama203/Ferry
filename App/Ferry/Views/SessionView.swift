@@ -22,8 +22,8 @@ struct SessionView: View {
                     systemImage: "laptopcomputer",
                     transferLabel: "アップロード",
                     onTransfer: { entries in Task { await session.upload(entries) } },
-                    dropTypes: [.ferryRemoteItem],
-                    onDrop: handleRemoteItemsDropped,
+                    dropTypes: [.ferryRemoteItem, .fileURL],
+                    onDrop: handleLocalPaneDrop,
                     dragWriter: { NSURL(fileURLWithPath: $0.path) },
                     onSync: session.status == .connected ? { isSyncing = true } : nil
                 )
@@ -139,7 +139,7 @@ struct SessionView: View {
                         Button {
                             Task { await session.open(bookmark) }
                         } label: {
-                            Text(bookmark.name)
+                            Text(bookmark.name + (store.server(withID: session.server.id)?.startBookmarkID == bookmark.id ? "（接続時に開く）" : ""))
                             Text("\((bookmark.localPath as NSString).lastPathComponent) ⇄ \(bookmark.remotePath)")
                         }
                         .disabled(session.status != .connected)
@@ -148,6 +148,10 @@ struct SessionView: View {
                 Menu("編集") {
                     ForEach(bookmarks) { bookmark in
                         Menu(bookmark.name) {
+                            Toggle("接続時に開く", isOn: Binding(
+                                get: { store.server(withID: session.server.id)?.startBookmarkID == bookmark.id },
+                                set: { store.setStartBookmark($0 ? bookmark.id : nil, of: session.server.id) }
+                            ))
                             Button("名前を変更…") {
                                 bookmarkName = bookmark.name
                                 bookmarkToRename = bookmark
@@ -241,6 +245,26 @@ struct SessionView: View {
                 onSync: { isSyncing = true }
             )
         }
+    }
+
+    /// 左のペインへのドロップ: 右のペインの項目はダウンロード、Finder のフォルダはそこへ移動
+    private func handleLocalPaneDrop(_ pasteboard: NSPasteboard) -> Bool {
+        if handleRemoteItemsDropped(pasteboard) {
+            return true
+        }
+        guard let url = (pasteboard.readObjects(forClasses: [NSURL.self],
+                                                options: [.urlReadingFileURLsOnly: true]) as? [URL])?.first else {
+            return false
+        }
+        let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        let folder = isDirectory ? url : url.deletingLastPathComponent()
+        Task {
+            await session.local.load(folder.path)
+            if !isDirectory {
+                session.local.selection = [url.path]
+            }
+        }
+        return true
     }
 
     /// 右のペインからドロップされたリモートの項目をダウンロード

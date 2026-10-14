@@ -22,6 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Finder で開いているフォルダを左のペインで開くために使います。</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>UTExportedTypeDeclarations</key>

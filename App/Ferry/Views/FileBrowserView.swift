@@ -107,6 +107,21 @@ struct FileBrowserView: View {
                 ProgressView().controlSize(.small)
             }
             Group {
+                if model.side == .local {
+                    Menu {
+                        Button("フォルダを選択…") { chooseLocalFolder() }
+                        Button("Finder で開いているフォルダ") { openFinderFrontFolder() }
+                        Divider()
+                        Button("このフォルダを Finder で開く") {
+                            NSWorkspace.shared.open(URL(fileURLWithPath: model.path))
+                        }
+                    } label: {
+                        Image(systemName: "folder")
+                    }
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Finder からフォルダを選ぶ（Finder のフォルダをここへドラッグしても移動できます）")
+                }
                 Button { Task { await model.goBack() } } label: { Image(systemName: "chevron.left") }
                     .disabled(!model.canGoBack)
                     .help("戻る")
@@ -318,6 +333,26 @@ struct FileBrowserView: View {
             Task { await model.delete(targets) }
         } else {
             deleteTargets = targets
+        }
+    }
+
+    private func chooseLocalFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.directoryURL = URL(fileURLWithPath: model.path)
+        panel.prompt = "開く"
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { await model.load(url.path) }
+        }
+    }
+
+    private func openFinderFrontFolder() {
+        switch FinderBridge.frontWindowFolder() {
+        case .success(let path):
+            Task { await model.load(path) }
+        case .failure(let error):
+            model.errorMessage = error.localizedDescription
         }
     }
 

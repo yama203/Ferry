@@ -59,6 +59,12 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
     public var folderID: UUID?
     /// 左右のペインで開く場所の組み合わせ
     public var bookmarks: [PaneBookmark]?
+    /// 接続時に開くブックマーク
+    public var startBookmarkID: UUID?
+
+    public var startBookmark: PaneBookmark? {
+        bookmarks?.first { $0.id == startBookmarkID }
+    }
 
     public init(
         id: UUID = UUID(),

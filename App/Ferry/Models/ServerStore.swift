@@ -144,8 +144,18 @@ final class ServerStore {
         save()
     }
 
+    /// 接続時に開くブックマークを設定する（nil で解除）
+    func setStartBookmark(_ bookmarkID: UUID?, of serverID: UUID) {
+        guard let index = servers.firstIndex(where: { $0.id == serverID }) else { return }
+        servers[index].startBookmarkID = bookmarkID
+        save()
+    }
+
     func removeBookmark(_ bookmarkID: UUID, of serverID: UUID) {
         guard let index = servers.firstIndex(where: { $0.id == serverID }) else { return }
+        if servers[index].startBookmarkID == bookmarkID {
+            servers[index].startBookmarkID = nil
+        }
         servers[index].bookmarks?.removeAll { $0.id == bookmarkID }
         if servers[index].bookmarks?.isEmpty == true {
             servers[index].bookmarks = nil

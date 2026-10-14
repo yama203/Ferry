@@ -52,6 +52,14 @@ struct ServerEditView: View {
                 }
 
                 Section("詳細") {
+                    if let bookmarks = draft.bookmarks, !bookmarks.isEmpty {
+                        Picker("接続時に開く場所", selection: $draft.startBookmarkID) {
+                            Text("下の初期フォルダ").tag(UUID?.none)
+                            ForEach(bookmarks) { bookmark in
+                                Text("ブックマーク: \(bookmark.name)").tag(Optional(bookmark.id))
+                            }
+                        }
+                    }
                     TextField("リモートの初期フォルダ", text: optional(\.initialPath), prompt: Text("ログイン時のフォルダ"))
                     HStack {
                         TextField("ローカルの初期フォルダ", text: optional(\.localPath), prompt: Text("ホームフォルダ"))

@@ -166,6 +166,18 @@ struct ServerSidebar: View {
     }
 
     @ViewBuilder private func serverMenu(_ server: ServerConfig) -> some View {
+        if let bookmarks = server.bookmarks, !bookmarks.isEmpty {
+            Menu("ブックマークで開く") {
+                ForEach(bookmarks) { bookmark in
+                    Button(bookmark.name) {
+                        let session = sessions.session(for: server)
+                        Task { await session.open(bookmark) }
+                        selection = server.id
+                    }
+                }
+            }
+            Divider()
+        }
         Button("編集…") { editor = .init(server: server, isNew: false) }
         Button("複製") { duplicate(server) }
         if !store.folders.isEmpty {

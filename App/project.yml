@@ -23,6 +23,7 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.developer-tools
         NSHumanReadableCopyright: ""
+        NSAppleEventsUsageDescription: Finder で開いているフォルダを左のペインで開くために使います。
         UTExportedTypeDeclarations:
           - UTTypeIdentifier: com.yama.ferry.remote-item
             UTTypeDescription: Ferry Remote Item
