@@ -278,7 +278,7 @@ struct ServerSidebar: View {
         var copy = server
         copy.id = UUID()
         copy.name += " のコピー"
-        Keychain.setPassword(Keychain.password(for: server.id), for: copy.id)
+        Passwords.setPassword(Passwords.password(for: server.id), for: copy.id)
         store.upsert(copy)
     }
 

@@ -23,7 +23,7 @@ struct ServerEditView: View {
         self.isNew = isNew
         self.onSave = onSave
         _draft = State(initialValue: server)
-        _password = State(initialValue: isNew ? "" : Keychain.password(for: server.id) ?? "")
+        _password = State(initialValue: isNew ? "" : Passwords.password(for: server.id) ?? "")
         _portText = State(initialValue: server.port.map(String.init) ?? "")
     }
 

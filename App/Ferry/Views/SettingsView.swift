@@ -2,8 +2,12 @@ import AppKit
 import SwiftUI
 
 struct SettingsView: View {
+    let vault: PasswordVault?
+
     var body: some View {
         TabView {
+            PasswordSyncSettings(vault: vault)
+                .tabItem { Label("パスワード同期", systemImage: "key.icloud") }
             ExcludeSettings()
                 .tabItem { Label("除外", systemImage: "line.3.horizontal.decrease.circle") }
             EditorSettings()
@@ -128,5 +132,120 @@ private struct NotificationSettings: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding()
+    }
+}
+
+/// パスワードを iCloud Drive で同期する設定
+private struct PasswordSyncSettings: View {
+    let vault: PasswordVault?
+
+    @Environment(ServerStore.self) private var store
+    @State private var master = ""
+    @State private var confirm = ""
+    @State private var message: String?
+    @State private var confirmingDisable = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let vault {
+                switch vault.state {
+                case .off: setup(vault)
+                case .locked: unlock(vault)
+                case .unlocked: status(vault)
+                }
+            } else {
+                Label("iCloud Drive が使えないため、パスワードの同期はできません", systemImage: "icloud.slash")
+            }
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func setup(_ vault: PasswordVault) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("接続先のパスワードを暗号化して iCloud Drive に保存し、他の Mac と同期します。")
+            Text("暗号化に使う「マスターパスワード」を決めてください。他の Mac では最初に 1 回だけ入力します。忘れると同期したパスワードは読み出せません（各 Mac に保存済みのパスワードは残ります）。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SecureField("マスターパスワード", text: $master)
+            SecureField("もう一度入力", text: $confirm)
+            HStack {
+                Spacer()
+                Button("同期を始める") {
+                    guard master.count >= 8 else { return message = "8 文字以上にしてください" }
+                    guard master == confirm else { return message = "2 つの入力が一致しません" }
+                    // この Mac に保存してあるパスワードを最初の中身にする
+                    var initial: [UUID: String] = [:]
+                    for server in store.servers {
+                        if let password = Keychain.password(for: server.id) { initial[server.id] = password }
+                    }
+                    do {
+                        try vault.enable(masterPassword: master, initial: initial)
+                        message = nil
+                        master = ""
+                        confirm = ""
+                    } catch {
+                        message = error.localizedDescription
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(master.isEmpty)
+            }
+        }
+    }
+
+    private func unlock(_ vault: PasswordVault) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("他の Mac でパスワードの同期が設定されています", systemImage: "lock.icloud")
+                .font(.headline)
+            Text("マスターパスワードを入力すると、この Mac でも同期したパスワードが使えるようになります。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            SecureField("マスターパスワード", text: $master)
+                .onSubmit { unlockVault(vault) }
+            HStack {
+                Spacer()
+                Button("この Mac で使う") { unlockVault(vault) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(master.isEmpty)
+            }
+        }
+    }
+
+    private func unlockVault(_ vault: PasswordVault) {
+        do {
+            try vault.unlock(masterPassword: master)
+            message = nil
+            master = ""
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func status(_ vault: PasswordVault) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("iCloud Drive で同期中", systemImage: "checkmark.icloud.fill")
+                .font(.headline)
+                .foregroundStyle(.green)
+            Text("\(vault.count) 件のパスワードを同期しています。パスワードを保存・変更すると、他の Mac にも反映されます。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Spacer()
+                Button("同期をやめる…", role: .destructive) { confirmingDisable = true }
+            }
+        }
+        .confirmationDialog("パスワードの同期をやめますか？", isPresented: $confirmingDisable) {
+            Button("同期をやめる", role: .destructive) { vault.disable() }
+        } message: {
+            Text("すべての Mac で同期が止まります。iCloud Drive の暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。")
+        }
     }
 }

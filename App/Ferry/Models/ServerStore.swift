@@ -106,7 +106,7 @@ final class ServerStore {
 
     func delete(_ id: UUID) {
         servers.removeAll { $0.id == id }
-        Keychain.setPassword(nil, for: id)
+        Passwords.setPassword(nil, for: id)
         save()
     }
 

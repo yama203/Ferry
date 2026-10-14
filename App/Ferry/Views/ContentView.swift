@@ -54,7 +54,7 @@ struct ContentView: View {
         }
         .sheet(item: $editor) { request in
             ServerEditView(server: request.server, isNew: request.isNew) { server, password in
-                Keychain.setPassword(password, for: server.id)
+                Passwords.setPassword(password, for: server.id)
                 sessions.close(server.id)
                 store.upsert(server)
                 selection = server.id

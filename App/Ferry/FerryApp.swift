@@ -5,11 +5,16 @@ import SwiftUI
 struct FerryApp: App {
     @State private var store: ServerStore
     @State private var sessions: SessionManager
+    @State private var vault: PasswordVault?
 
     init() {
         let store = ServerStore()
         _store = State(initialValue: store)
         _sessions = State(initialValue: SessionManager(store: store))
+        // パスワードの同期は iCloud Drive が使える場合だけ
+        let vault = store.isICloud ? PasswordVault(directory: store.fileURL.deletingLastPathComponent()) : nil
+        Passwords.vault = vault
+        _vault = State(initialValue: vault)
         Notifier.setUp()
         // 同梱したルート証明書を使う（Homebrew の無い Mac でも FTPS の証明書を検証できるように）
         RemoteClient.caBundlePath = Bundle.main.path(forResource: "cacert", ofType: "pem")
@@ -31,7 +36,7 @@ struct FerryApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(vault: vault)
                 .environment(store)
         }
     }

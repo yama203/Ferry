@@ -95,7 +95,7 @@ final class ServerSession {
         remote.client?.setPassword(password)
         transferClient.setPassword(password)
         if save {
-            Keychain.setPassword(password, for: server.id)
+            Passwords.setPassword(password, for: server.id)
         }
         hasPassword = true
         status = .idle
@@ -238,7 +238,7 @@ final class SessionManager {
             return existing
         }
         sessions[server.id]?.close()
-        let session = ServerSession(server: server, password: Keychain.password(for: server.id)) { [weak store] in
+        let session = ServerSession(server: server, password: Passwords.password(for: server.id)) { [weak store] in
             store?.excludeRules ?? .defaults
         }
         sessions[server.id] = session
