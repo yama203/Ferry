@@ -196,6 +196,39 @@ struct FileBrowserView: View {
         }
     }
 
+    /// Finder と同じ並び（レッド〜グレイ）の標準タグと、このフォルダで使われている他のタグ
+    private func tagMenu(for targets: [FileEntry]) -> [MenuAction] {
+        let labels = NSWorkspace.shared.fileLabels
+        let standard: [FinderTag] = [6, 7, 5, 2, 4, 3, 1].compactMap { number in
+            labels.indices.contains(number) ? FinderTag(name: labels[number], color: number) : nil
+        }
+        var custom: [FinderTag] = []
+        for tag in model.entries.flatMap(\.tags) where !standard.contains(where: { $0.name == tag.name })
+            && !custom.contains(where: { $0.name == tag.name }) {
+            custom.append(tag)
+        }
+
+        func action(for tag: FinderTag) -> MenuAction {
+            let applied = targets.allSatisfy { $0.tags.contains { $0.name == tag.name } }
+            return MenuAction(title: tag.name, image: TagMenuImage.make(colorNumber: tag.color), isChecked: applied) {
+                Task { await model.setTag(tag.name, on: targets, enabled: !applied) }
+            }
+        }
+
+        var items = standard.map(action(for:))
+        if !custom.isEmpty {
+            items.append(.separator)
+            items += custom.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }.map(action(for:))
+        }
+        if targets.contains(where: { !$0.tags.isEmpty }) {
+            items.append(.separator)
+            items.append(MenuAction(title: "すべてのタグを外す") {
+                Task { await model.clearTags(on: targets) }
+            })
+        }
+        return items
+    }
+
     private func menuItems(for targets: [FileEntry]) -> [MenuAction] {
         var items: [MenuAction] = []
         if !targets.isEmpty {
@@ -217,6 +250,7 @@ struct FileBrowserView: View {
                     permissionTargets = targets
                 })
             } else {
+                items.append(MenuAction(title: "タグ", submenu: tagMenu(for: targets)))
                 items.append(MenuAction(title: "Finder で表示") {
                     NSWorkspace.shared.activateFileViewerSelecting(targets.map { URL(fileURLWithPath: $0.path) })
                 })
@@ -309,6 +343,25 @@ struct FileBrowserView: View {
 
     private func isPresent<T>(_ binding: Binding<[T]>) -> Binding<Bool> {
         Binding(get: { !binding.wrappedValue.isEmpty }, set: { if !$0 { binding.wrappedValue = [] } })
+    }
+}
+
+/// タグのメニュー項目に付ける色の丸
+enum TagMenuImage {
+    static func make(colorNumber: Int) -> NSImage {
+        let color = FinderTagColor.color(for: colorNumber)
+        return NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1))
+            if let color {
+                color.setFill()
+                circle.fill()
+            } else {
+                NSColor.secondaryLabelColor.setStroke()
+                circle.lineWidth = 1
+                circle.stroke()
+            }
+            return true
+        }
     }
 }
 

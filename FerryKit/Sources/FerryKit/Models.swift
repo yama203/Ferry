@@ -57,6 +57,8 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
     public var localPath: String?
     /// サイドバーのフォルダ。nil ならフォルダに入れない。
     public var folderID: UUID?
+    /// 左右のペインで開く場所の組み合わせ
+    public var bookmarks: [PaneBookmark]?
 
     public init(
         id: UUID = UUID(),
@@ -87,6 +89,21 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
     }
 
     public var effectivePort: Int { port ?? serverProtocol.defaultPort }
+}
+
+/// 「この Mac のフォルダ」と「サーバーのフォルダ」の組み合わせ
+public struct PaneBookmark: Codable, Identifiable, Hashable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var localPath: String
+    public var remotePath: String
+
+    public init(id: UUID = UUID(), name: String, localPath: String, remotePath: String) {
+        self.id = id
+        self.name = name
+        self.localPath = localPath
+        self.remotePath = remotePath
+    }
 }
 
 public struct RemoteItem: Identifiable, Hashable, Sendable {

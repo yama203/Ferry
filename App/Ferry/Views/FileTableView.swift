@@ -379,13 +379,27 @@ struct MenuAction {
     var title: String
     var isDestructive = false
     var isSeparator = false
+    var image: NSImage?
+    var isChecked = false
+    var submenu: [MenuAction]?
     var action: () -> Void = {}
 
     static let separator = MenuAction(title: "", isSeparator: true)
 
     func menuItem() -> NSMenuItem {
         if isSeparator { return .separator() }
-        return ClosureMenuItem(title: title, action: action)
+        let item: NSMenuItem
+        if let submenu {
+            item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let menu = NSMenu(title: title)
+            submenu.forEach { menu.addItem($0.menuItem()) }
+            item.submenu = menu
+        } else {
+            item = ClosureMenuItem(title: title, action: action)
+        }
+        item.image = image
+        item.state = isChecked ? .on : .off
+        return item
     }
 }
 

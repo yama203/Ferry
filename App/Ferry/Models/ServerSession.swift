@@ -95,6 +95,12 @@ final class ServerSession {
         await connect()
     }
 
+    /// ブックマークした組み合わせを左右のペインで開く
+    func open(_ bookmark: PaneBookmark) async {
+        await local.load(bookmark.localPath)
+        await remote.load(bookmark.remotePath)
+    }
+
     func close() {
         transfers.cancelAll()
         editWatcher.stopAll()
@@ -239,6 +245,8 @@ extension ServerConfig {
         var a = self, b = other
         a.folderID = nil
         b.folderID = nil
+        a.bookmarks = nil
+        b.bookmarks = nil
         a.name = ""
         b.name = ""
         return a == b

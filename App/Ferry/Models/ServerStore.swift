@@ -129,6 +129,30 @@ final class ServerStore {
         save()
     }
 
+    // MARK: - ブックマーク（左右の場所の組み合わせ）
+
+    func addBookmark(_ bookmark: PaneBookmark, to serverID: UUID) {
+        guard let index = servers.firstIndex(where: { $0.id == serverID }) else { return }
+        servers[index].bookmarks = (servers[index].bookmarks ?? []) + [bookmark]
+        save()
+    }
+
+    func renameBookmark(_ bookmarkID: UUID, of serverID: UUID, to name: String) {
+        guard let index = servers.firstIndex(where: { $0.id == serverID }),
+              let bookmarkIndex = servers[index].bookmarks?.firstIndex(where: { $0.id == bookmarkID }) else { return }
+        servers[index].bookmarks?[bookmarkIndex].name = name
+        save()
+    }
+
+    func removeBookmark(_ bookmarkID: UUID, of serverID: UUID) {
+        guard let index = servers.firstIndex(where: { $0.id == serverID }) else { return }
+        servers[index].bookmarks?.removeAll { $0.id == bookmarkID }
+        if servers[index].bookmarks?.isEmpty == true {
+            servers[index].bookmarks = nil
+        }
+        save()
+    }
+
     // MARK: - フォルダ
 
     @discardableResult

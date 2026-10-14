@@ -171,6 +171,25 @@ final class BrowserModel {
         }
     }
 
+    /// Finder のタグを付ける・外す（ローカルのみ）。標準の色名なら Finder が色を割り当てる。
+    func setTag(_ name: String, on targets: [FileEntry], enabled: Bool) async {
+        await perform {
+            for entry in targets {
+                var names = entry.tags.map(\.name).filter { $0 != name }
+                if enabled { names.append(name) }
+                try (URL(fileURLWithPath: entry.path) as NSURL).setResourceValue(names, forKey: .tagNamesKey)
+            }
+        }
+    }
+
+    func clearTags(on targets: [FileEntry]) async {
+        await perform {
+            for entry in targets {
+                try (URL(fileURLWithPath: entry.path) as NSURL).setResourceValue([String](), forKey: .tagNamesKey)
+            }
+        }
+    }
+
     func changePermissions(_ targets: [FileEntry], mode: String) async {
         guard let client else { return }
         await perform {

@@ -1,3 +1,4 @@
+import FerryKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -8,6 +9,9 @@ struct SessionView: View {
 
     @Environment(ServerStore.self) private var store
     @State private var isSyncing = false
+    @State private var isAddingBookmark = false
+    @State private var bookmarkName = ""
+    @State private var bookmarkToRename: PaneBookmark?
 
     var body: some View {
         VSplitView {
@@ -44,6 +48,24 @@ struct SessionView: View {
         .sheet(isPresented: $isSyncing) {
             SyncView(session: session, excludeRules: store.excludeRules)
         }
+        .alert("ブックマークを追加", isPresented: $isAddingBookmark) {
+            TextField("名前", text: $bookmarkName)
+            Button("追加") { addBookmark() }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("この Mac: \(session.local.path)\nサーバー: \(session.remote.path)")
+        }
+        .alert("ブックマークの名前を変更", isPresented: Binding(get: { bookmarkToRename != nil },
+                                                      set: { if !$0 { bookmarkToRename = nil } })) {
+            TextField("名前", text: $bookmarkName)
+            Button("変更") {
+                let name = bookmarkName.trimmingCharacters(in: .whitespaces)
+                if let target = bookmarkToRename, !name.isEmpty {
+                    store.renameBookmark(target.id, of: session.server.id, to: name)
+                }
+            }
+            Button("キャンセル", role: .cancel) {}
+        }
         .confirmationDialog(conflictTitle, isPresented: hasConflict, presenting: session.transfers.pendingConflicts.first) { conflict in
             Button("新しい場合のみ上書き") { session.transfers.resolve(conflict, with: .newerOnly) }
             Button("すべて上書き") { session.transfers.resolve(conflict, with: .overwrite) }
@@ -63,6 +85,8 @@ struct SessionView: View {
             if !session.editWatcher.files.isEmpty {
                 EditingMenu(watcher: session.editWatcher)
             }
+
+            bookmarksMenu
 
             Button {
                 Task { await session.upload(session.local.selectedEntries) }
@@ -93,6 +117,59 @@ struct SessionView: View {
             }
             .help("接続設定を編集")
         }
+    }
+
+    // MARK: - ブックマーク
+
+    private var bookmarks: [PaneBookmark] {
+        store.server(withID: session.server.id)?.bookmarks ?? []
+    }
+
+    private var bookmarksMenu: some View {
+        Menu {
+            Button("今の組み合わせを追加…") {
+                bookmarkName = RemotePath.name(of: session.remote.path)
+                isAddingBookmark = true
+            }
+            .disabled(session.status != .connected)
+
+            if !bookmarks.isEmpty {
+                Section("ブックマーク") {
+                    ForEach(bookmarks) { bookmark in
+                        Button {
+                            Task { await session.open(bookmark) }
+                        } label: {
+                            Text(bookmark.name)
+                            Text("\((bookmark.localPath as NSString).lastPathComponent) ⇄ \(bookmark.remotePath)")
+                        }
+                        .disabled(session.status != .connected)
+                    }
+                }
+                Menu("編集") {
+                    ForEach(bookmarks) { bookmark in
+                        Menu(bookmark.name) {
+                            Button("名前を変更…") {
+                                bookmarkName = bookmark.name
+                                bookmarkToRename = bookmark
+                            }
+                            Button("削除", role: .destructive) {
+                                store.removeBookmark(bookmark.id, of: session.server.id)
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("ブックマーク", systemImage: "bookmark")
+        }
+        .help("左右で開いている場所の組み合わせ")
+    }
+
+    private func addBookmark() {
+        let name = bookmarkName.trimmingCharacters(in: .whitespaces)
+        store.addBookmark(PaneBookmark(name: name.isEmpty ? RemotePath.name(of: session.remote.path) : name,
+                                       localPath: session.local.path, remotePath: session.remote.path),
+                          to: session.server.id)
     }
 
     private var hasConflict: Binding<Bool> {
