@@ -12,6 +12,7 @@ struct ServerSidebar: View {
     @State private var pendingFolderDelete: ServerFolder?
     @State private var folderNameTarget: FolderNameTarget?
     @State private var folderName = ""
+    @State private var searchText = ""
 
     private enum FolderNameTarget: Identifiable {
         case new
@@ -25,34 +26,33 @@ struct ServerSidebar: View {
     }
 
     var body: some View {
+        dialogs(list)
+    }
+
+    private var list: some View {
         List(selection: $selection) {
-            ForEach(store.folders) { folder in
-                Section(isExpanded: expansion(of: folder)) {
-                    rows(for: store.servers(inFolder: folder.id))
-                } header: {
-                    folderHeader(folder)
+            if isSearching {
+                Section("検索結果") {
+                    rows(for: searchResults)
                 }
+            } else {
+                folderSections
             }
-            Section {
-                rows(for: store.servers(inFolder: nil))
-            } header: {
-                Text(store.folders.isEmpty ? "接続先" : "フォルダなし")
-                    .dropDestination(for: String.self) { ids, _ in
-                        moveServers(ids, to: nil)
-                    }
+        }
+        .searchable(text: $searchText, placement: .sidebar, prompt: "接続先を検索")
+        .onSubmit(of: .search) {
+            // Return で最初の結果に接続
+            if let first = sortedByName(searchResults).first {
+                selection = first.id
+            }
+        }
+        .overlay {
+            if isSearching && searchResults.isEmpty {
+                ContentUnavailableView.search(text: searchText)
             }
         }
         .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 6) {
-                Image(systemName: store.isICloud ? "icloud" : "internaldrive")
-                Text(store.isICloud ? "iCloud Drive で同期" : "この Mac に保存")
-                Spacer()
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.bar)
+            footer
         }
         .toolbar {
             ToolbarItem {
@@ -66,6 +66,64 @@ struct ServerSidebar: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder private var folderSections: some View {
+        ForEach(store.folders) { folder in
+            Section(isExpanded: expansion(of: folder)) {
+                rows(for: store.servers(inFolder: folder.id))
+            } header: {
+                folderHeader(folder)
+            }
+        }
+        Section {
+            rows(for: store.servers(inFolder: nil))
+        } header: {
+            Text(store.folders.isEmpty ? "接続先" : "フォルダなし")
+                .dropDestination(for: String.self) { ids, _ in
+                    moveServers(ids, to: nil)
+                }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: store.isICloud ? "icloud" : "internaldrive")
+            Text(store.isICloud ? "iCloud Drive で同期" : "この Mac に保存")
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    // MARK: - 検索
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// 空白区切りの語をすべて含む接続先（名前・ホスト・ユーザー名・フォルダ名が対象）
+    private var searchResults: [ServerConfig] {
+        let words = searchText.split(whereSeparator: \.isWhitespace).map(String.init)
+        let folderNames = Dictionary(uniqueKeysWithValues: store.folders.map { ($0.id, $0.name) })
+        return store.servers.filter { server in
+            let haystack = [server.name, server.host, server.username,
+                            server.folderID.flatMap { folderNames[$0] } ?? ""].joined(separator: " ")
+            return words.allSatisfy { haystack.localizedStandardContains($0) }
+        }
+    }
+
+    private func sortedByName(_ servers: [ServerConfig]) -> [ServerConfig] {
+        servers.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    // MARK: - ダイアログ
+
+    private func dialogs<Content: View>(_ content: Content) -> some View {
+        content
         .confirmationDialog("「\(pendingDelete?.name ?? "")」を削除しますか？",
                             isPresented: isPresent($pendingDelete), presenting: pendingDelete) { server in
             Button("削除", role: .destructive) {
@@ -93,7 +151,7 @@ struct ServerSidebar: View {
     // MARK: - 部品
 
     private func rows(for servers: [ServerConfig]) -> some View {
-        ForEach(servers.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { server in
+        ForEach(sortedByName(servers)) { server in
             ServerRow(server: server)
                 .tag(server.id)
                 .draggable(server.id.uuidString)
