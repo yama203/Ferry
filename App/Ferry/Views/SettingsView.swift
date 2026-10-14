@@ -144,6 +144,7 @@ private struct PasswordSyncSettings: View {
     @State private var confirm = ""
     @State private var message: String?
     @State private var confirmingDisable = false
+    @State private var addResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -238,8 +239,23 @@ private struct PasswordSyncSettings: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
+                Button("この Mac のパスワードを同期に追加") {
+                    let result = Passwords.addLocalPasswordsToVault(serverIDs: store.servers.map(\.id))
+                    var text = "\(result.added) 件を追加しました。"
+                    if !result.failures.isEmpty {
+                        let detail = result.failures.map { "コード \($0.key)：\($0.value) 件" }.joined(separator: "、")
+                        text += "読めなかったもの（\(detail)）があります。"
+                    }
+                    addResult = text
+                }
                 Spacer()
                 Button("同期をやめる…", role: .destructive) { confirmingDisable = true }
+            }
+            if let addResult {
+                Text(addResult)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .confirmationDialog("パスワードの同期をやめますか？", isPresented: $confirmingDisable) {

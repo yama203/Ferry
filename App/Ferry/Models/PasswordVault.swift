@@ -81,6 +81,20 @@ final class PasswordVault {
 
     // MARK: - 開始・解除・停止
 
+    /// まだ同期していないパスワードをまとめて追加する
+    func add(_ entries: [UUID: String]) {
+        guard state == .unlocked, !entries.isEmpty else { return }
+        reload()
+        for (id, password) in entries where passwords[id.uuidString] == nil {
+            passwords[id.uuidString] = password
+        }
+        persist()
+    }
+
+    func contains(_ id: UUID) -> Bool {
+        passwords[id.uuidString] != nil
+    }
+
     /// 同期を始める。この Mac に保存してあるパスワードを最初の中身にする。
     func enable(masterPassword: String, initial: [UUID: String]) throws {
         let salt = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
@@ -205,7 +219,34 @@ enum Passwords {
     static var vault: PasswordVault?
 
     static func password(for id: UUID) -> String? {
-        vault?.password(for: id) ?? Keychain.password(for: id)
+        if let synced = vault?.password(for: id) {
+            return synced
+        }
+        let local = Keychain.password(for: id)
+        // この Mac にだけあるパスワードは、使ったときに同期へ追加する
+        if let local, let vault, vault.state == .unlocked {
+            // 画面の描画中に呼ばれることがあるので、状態の変更は後で行う
+            Task { @MainActor in vault.add([id: local]) }
+        }
+        return local
+    }
+
+    /// この Mac のキーチェーンにあって同期にまだ無いパスワードを追加する。
+    /// 戻り値は追加した件数と、読めなかったもの（OSStatus ごとの件数）。
+    static func addLocalPasswordsToVault(serverIDs: [UUID]) -> (added: Int, failures: [OSStatus: Int]) {
+        guard let vault, vault.state == .unlocked else { return (0, [:]) }
+        var entries: [UUID: String] = [:]
+        var failures: [OSStatus: Int] = [:]
+        for id in serverIDs where !vault.contains(id) {
+            let (value, status) = Keychain.readSecret(account: id.uuidString)
+            if let value {
+                entries[id] = value
+            } else if status != errSecItemNotFound {
+                failures[status, default: 0] += 1
+            }
+        }
+        vault.add(entries)
+        return (entries.count, failures)
     }
 
     static func setPassword(_ password: String?, for id: UUID) {

@@ -15,6 +15,11 @@ enum Keychain {
     }
 
     static func secret(account: String) -> String? {
+        readSecret(account: account).value
+    }
+
+    /// 読めなかったときの理由（OSStatus）も返す
+    static func readSecret(account: String) -> (value: String?, status: OSStatus) {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
@@ -23,9 +28,9 @@ enum Keychain {
             kSecMatchLimit: kSecMatchLimitOne,
         ]
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return (nil, status) }
+        return (String(data: data, encoding: .utf8), status)
     }
 
     static func setSecret(_ password: String?, account: String) {
