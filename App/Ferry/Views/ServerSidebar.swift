@@ -10,6 +10,8 @@ struct ServerSidebar: View {
     @AppStorage("collapsedFolders") private var collapsedFolders = ""
     /// 閉じているフォルダ。@AppStorage を直接使うとアニメーションしないため、画面内の状態として持つ。
     @State private var collapsedIDs: Set<String> = []
+    /// 開くアニメーション中だけ、フォルダに表示する行数を絞る（行が多いと List がアニメーションを省くため）
+    @State private var revealLimits: [UUID: Int] = [:]
     @State private var pendingDelete: ServerConfig?
     @State private var pendingFolderDelete: ServerFolder?
     @State private var folderNameTarget: FolderNameTarget?
@@ -79,7 +81,7 @@ struct ServerSidebar: View {
     @ViewBuilder private var folderSections: some View {
         ForEach(store.folders) { folder in
             Section(isExpanded: expansion(of: folder)) {
-                rows(for: store.servers(inFolder: folder.id))
+                rows(for: Array(sortedByName(store.servers(inFolder: folder.id)).prefix(revealLimits[folder.id] ?? .max)))
             } header: {
                 folderHeader(folder)
             }
@@ -232,19 +234,35 @@ struct ServerSidebar: View {
         Binding(
             get: { !collapsedIDs.contains(folder.id.uuidString) },
             set: { expanded in
-                // 行が多いと短時間で大きく動いて一瞬で切り替わったように見えるので、行数に応じて少し長くする
                 let rows = store.servers(inFolder: folder.id).count
-                let duration = 0.22 + Double(min(rows, 30)) * 0.009
+                let duration = 0.22 + Double(min(rows, Self.animatedRowLimit)) * 0.009
+                // 行が多いと一度に挿入するとアニメーションが省かれるので、最初の数行だけ動かし、残りは直後に足す
+                let staged = expanded && rows > Self.animatedRowLimit + 2
                 withAnimation(.smooth(duration: duration)) {
+                    // 同じアニメーションの中で変更しないと、更新全体がアニメーションなし扱いになる
+                    if staged {
+                        revealLimits[folder.id] = Self.animatedRowLimit
+                    }
                     if expanded {
                         collapsedIDs.remove(folder.id.uuidString)
                     } else {
                         collapsedIDs.insert(folder.id.uuidString)
                     }
                 }
+                if staged {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { revealLimits[folder.id] = nil }
+                    }
+                }
             }
         )
     }
+
+    /// 一度に挿入する行が多いと List が開くアニメーションを省くため、最初はこの行数だけ動かす（録画で確認した値）
+    private static let animatedRowLimit = 6
+
 
     private func moveServers(_ ids: [String], to folderID: UUID?) -> Bool {
         let uuids = ids.compactMap(UUID.init(uuidString:))
