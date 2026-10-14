@@ -76,7 +76,10 @@ private struct WelcomeView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("Ferry", systemImage: "ferry")
+            VStack(spacing: 10) {
+                BrandMark(size: 64)
+                Text("Ferry").font(.title.bold())
+            }
         } description: {
             Text(hasServers ? "左のリストから接続先を選んでください" : "まずは接続先を追加しましょう")
         } actions: {

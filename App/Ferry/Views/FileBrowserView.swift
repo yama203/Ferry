@@ -29,8 +29,11 @@ struct FileBrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            pathBar
+            VStack(spacing: 0) {
+                header
+                pathBar
+            }
+            .background(headerBackground)
             Divider()
             table
                 .overlay {
@@ -95,7 +98,7 @@ struct FileBrowserView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(model.side == .remote ? Color.accentColor : .secondary)
             Text(title)
                 .font(.headline)
                 .lineLimit(1)
@@ -129,6 +132,14 @@ struct FileBrowserView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+
+    /// サーバー側は Ferry の色をうっすら敷いて、この Mac 側と見分けやすくする
+    @ViewBuilder private var headerBackground: some View {
+        if model.side == .remote {
+            LinearGradient(colors: [Color.accentColor.opacity(0.16), Color.accentColor.opacity(0.05)],
+                           startPoint: .leading, endPoint: .trailing)
+        }
     }
 
     private var pathBar: some View {

@@ -88,11 +88,17 @@ struct ServerSidebar: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Image(systemName: store.isICloud ? "icloud" : "internaldrive")
-            Text(store.isICloud ? "iCloud Drive で同期" : "この Mac に保存")
+            BrandMark(size: 18)
+            Text("Ferry")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.primary)
             Spacer()
+            Label(store.isICloud ? "iCloud で同期" : "この Mac に保存",
+                  systemImage: store.isICloud ? "icloud" : "internaldrive")
+                .labelStyle(.titleAndIcon)
+                .font(.caption)
+                .help(store.isICloud ? "接続先リストは iCloud Drive/Ferry に保存され、他の Mac と同期されます" : "")
         }
-        .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
