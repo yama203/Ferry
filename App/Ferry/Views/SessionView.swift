@@ -11,7 +11,7 @@ struct SessionView: View {
 
     var body: some View {
         VSplitView {
-            HSplitView {
+            PaneSplitView(autosaveName: "Ferry.Panes", minimumWidth: 260) {
                 FileBrowserView(
                     model: session.local,
                     title: "この Mac",
@@ -23,10 +23,8 @@ struct SessionView: View {
                     dragWriter: { NSURL(fileURLWithPath: $0.path) },
                     onSync: session.status == .connected ? { isSyncing = true } : nil
                 )
-                .frame(minWidth: 260, maxWidth: .infinity)
-
+            } right: {
                 remotePane
-                    .frame(minWidth: 260, maxWidth: .infinity)
             }
             .frame(minHeight: 280, maxHeight: .infinity)
 
