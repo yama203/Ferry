@@ -139,7 +139,10 @@ struct FileTableView: NSViewRepresentable {
             case .name:
                 cell.textField?.stringValue = entry.name
                 cell.imageView?.image = FileIcons.icon(for: entry, isLocal: parent.isLocal)
-                cell.textField?.toolTip = entry.isSymlink ? "シンボリックリンク" : nil
+                cell.tagDots?.colors = entry.tags.compactMap { FinderTagColor.color(for: $0.color) }
+                let tagNames = entry.tags.map(\.name).joined(separator: ", ")
+                cell.textField?.toolTip = [entry.isSymlink ? "シンボリックリンク" : nil, tagNames.isEmpty ? nil : "タグ: " + tagNames]
+                    .compactMap { $0 }.joined(separator: "\n").nilIfEmpty
             case .size:
                 cell.textField?.stringValue = Formatters.size(entry)
                 cell.textField?.alignment = .right
@@ -273,6 +276,8 @@ final class FerryTableView: NSTableView {
 }
 
 final class FileCellView: NSTableCellView {
+    private(set) var tagDots: TagDotsView?
+
     init(identifier: NSUserInterfaceItemIdentifier, withIcon: Bool) {
         super.init(frame: .zero)
         self.identifier = identifier
@@ -288,25 +293,85 @@ final class FileCellView: NSTableCellView {
             image.translatesAutoresizingMaskIntoConstraints = false
             addSubview(image)
             imageView = image
+            // Finder と同じく、名前のすぐ後ろにタグの色の丸を並べる
+            let dots = TagDotsView()
+            dots.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(dots)
+            tagDots = dots
+            text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             NSLayoutConstraint.activate([
                 image.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
                 image.centerYAnchor.constraint(equalTo: centerYAnchor),
                 image.widthAnchor.constraint(equalToConstant: 16),
                 image.heightAnchor.constraint(equalToConstant: 16),
                 text.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 6),
+                dots.leadingAnchor.constraint(equalTo: text.trailingAnchor, constant: 4),
+                dots.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -2),
+                dots.centerYAnchor.constraint(equalTo: centerYAnchor),
+                text.centerYAnchor.constraint(equalTo: centerYAnchor),
             ])
         } else {
-            text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2).isActive = true
+            NSLayoutConstraint.activate([
+                text.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+                text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+                text.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ])
         }
-        NSLayoutConstraint.activate([
-            text.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
-            text.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+}
+
+/// タグの色の丸（少しずつ重ねて並べる）
+final class TagDotsView: NSView {
+    var colors: [NSColor] = [] {
+        didSet {
+            guard colors != oldValue else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    private let diameter: CGFloat = 10
+    private let step: CGFloat = 6
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: colors.isEmpty ? 0 : diameter + CGFloat(colors.count - 1) * step, height: diameter)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        for (index, color) in colors.enumerated() {
+            let rect = NSRect(x: CGFloat(index) * step, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
+            let circle = NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5))
+            color.setFill()
+            circle.fill()
+            // 重なりが分かるよう縁取りする
+            NSColor.controlBackgroundColor.setStroke()
+            circle.lineWidth = 1
+            circle.stroke()
+        }
+    }
+}
+
+enum FinderTagColor {
+    static func color(for number: Int) -> NSColor? {
+        switch number {
+        case 1: .systemGray
+        case 2: .systemGreen
+        case 3: .systemPurple
+        case 4: .systemBlue
+        case 5: .systemYellow
+        case 6: .systemRed
+        case 7: .systemOrange
+        default: nil
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 /// 右クリックメニューの項目
