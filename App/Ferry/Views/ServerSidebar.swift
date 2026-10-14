@@ -232,7 +232,10 @@ struct ServerSidebar: View {
         Binding(
             get: { !collapsedIDs.contains(folder.id.uuidString) },
             set: { expanded in
-                withAnimation(.snappy(duration: 0.25)) {
+                // 行が多いと短時間で大きく動いて一瞬で切り替わったように見えるので、行数に応じて少し長くする
+                let rows = store.servers(inFolder: folder.id).count
+                let duration = 0.22 + Double(min(rows, 30)) * 0.009
+                withAnimation(.smooth(duration: duration)) {
                     if expanded {
                         collapsedIDs.remove(folder.id.uuidString)
                     } else {
