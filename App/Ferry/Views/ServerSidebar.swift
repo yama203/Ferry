@@ -10,8 +10,6 @@ struct ServerSidebar: View {
     @AppStorage("collapsedFolders") private var collapsedFolders = ""
     /// 閉じているフォルダ。@AppStorage を直接使うとアニメーションしないため、画面内の状態として持つ。
     @State private var collapsedIDs: Set<String> = []
-    /// 開くアニメーション中だけ、フォルダに表示する行数を絞る（行が多いと List がアニメーションを省くため）
-    @State private var revealLimits: [UUID: Int] = [:]
     @State private var pendingDelete: ServerConfig?
     @State private var pendingFolderDelete: ServerFolder?
     @State private var folderNameTarget: FolderNameTarget?
@@ -81,7 +79,7 @@ struct ServerSidebar: View {
     @ViewBuilder private var folderSections: some View {
         ForEach(store.folders) { folder in
             Section(isExpanded: expansion(of: folder)) {
-                rows(for: Array(sortedByName(store.servers(inFolder: folder.id)).prefix(revealLimits[folder.id] ?? .max)))
+                rows(for: store.servers(inFolder: folder.id))
             } header: {
                 folderHeader(folder)
             }
@@ -234,33 +232,21 @@ struct ServerSidebar: View {
         Binding(
             get: { !collapsedIDs.contains(folder.id.uuidString) },
             set: { expanded in
-                let rows = store.servers(inFolder: folder.id).count
-                let duration = 0.22 + Double(min(rows, Self.animatedRowLimit)) * 0.009
-                // 行が多いと一度に挿入するとアニメーションが省かれるので、最初の数行だけ動かし、残りは直後に足す
-                let staged = expanded && rows > Self.animatedRowLimit + 2
-                withAnimation(.smooth(duration: duration)) {
-                    // 同じアニメーションの中で変更しないと、更新全体がアニメーションなし扱いになる
-                    if staged {
-                        revealLimits[folder.id] = Self.animatedRowLimit
-                    }
+                // 一度に多くの行を挿入すると List がアニメーションを省き、段階的に出すと不自然になるので、
+                // 行の多いフォルダはアニメーションなしで開く
+                let animates = store.servers(inFolder: folder.id).count <= Self.animatedRowLimit
+                withAnimation(animates ? .smooth(duration: 0.25) : nil) {
                     if expanded {
                         collapsedIDs.remove(folder.id.uuidString)
                     } else {
                         collapsedIDs.insert(folder.id.uuidString)
                     }
                 }
-                if staged {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-                        var transaction = Transaction()
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) { revealLimits[folder.id] = nil }
-                    }
-                }
             }
         )
     }
 
-    /// 一度に挿入する行が多いと List が開くアニメーションを省くため、最初はこの行数だけ動かす（録画で確認した値）
+    /// これより行の多いフォルダはアニメーションしない（List が開くアニメーションを省くため。録画で確認した値）
     private static let animatedRowLimit = 6
 
 
