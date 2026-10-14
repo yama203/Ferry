@@ -1,0 +1,180 @@
+import AppKit
+import FerryKit
+import Foundation
+import Observation
+
+/// 片側のペイン（ローカルまたはリモート）の状態
+@MainActor @Observable
+final class BrowserModel {
+    enum Side { case local, remote }
+
+    let side: Side
+    /// リモート側の一覧表示・ファイル操作用。転送は TransferQueue が別の接続で行う。
+    let client: RemoteClient?
+
+    private(set) var path = ""
+    private(set) var entries: [FileEntry] = []
+    private(set) var isLoading = false
+    var errorMessage: String?
+    var selection = Set<FileEntry.ID>()
+    var sortOrder = [KeyPathComparator(\FileEntry.name, comparator: .localizedStandard)]
+    var showHidden: Bool
+
+    private var history: [String] = []
+
+    init(side: Side, client: RemoteClient? = nil) {
+        self.side = side
+        self.client = client
+        // WordPress などでは .htaccess を触るのでリモートは隠しファイルも表示する
+        showHidden = side == .remote
+    }
+
+    var canGoBack: Bool { !history.isEmpty }
+    var canGoUp: Bool { path != "/" && !path.isEmpty }
+
+    /// フォルダが先、その中で選択中の並び順
+    var visibleEntries: [FileEntry] {
+        let shown = showHidden ? entries : entries.filter { !$0.isHidden }
+        let folders = shown.filter(\.isDirectory).sorted(using: sortOrder)
+        let files = shown.filter { !$0.isDirectory }.sorted(using: sortOrder)
+        return folders + files
+    }
+
+    var selectedEntries: [FileEntry] {
+        entries.filter { selection.contains($0.id) }
+    }
+
+    /// パンくずリスト用
+    var pathComponents: [(name: String, path: String)] {
+        var result: [(String, String)] = [("/", "/")]
+        var current = ""
+        for part in path.split(separator: "/") {
+            current += "/" + part
+            result.append((String(part), current))
+        }
+        return result
+    }
+
+    // MARK: - 移動
+
+    func load(_ newPath: String, recordHistory: Bool = true) async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let loaded = try await fetch(newPath)
+            if recordHistory, !path.isEmpty, path != newPath {
+                history.append(path)
+            }
+            if path != newPath {
+                selection = []
+            }
+            path = newPath
+            entries = loaded
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refresh() async {
+        guard !path.isEmpty else { return }
+        await load(path, recordHistory: false)
+        // 消えた項目は選択から外す
+        selection.formIntersection(entries.map(\.id))
+    }
+
+    func goBack() async {
+        guard let previous = history.popLast() else { return }
+        await load(previous, recordHistory: false)
+    }
+
+    func goUp() async {
+        await load(RemotePath.parent(of: path))
+    }
+
+    func open(_ entry: FileEntry) async {
+        if entry.isDirectory || (side == .remote && entry.isSymlink) {
+            await load(entry.path)
+        } else if side == .local {
+            NSWorkspace.shared.open(URL(fileURLWithPath: entry.path))
+        }
+    }
+
+    private func fetch(_ directory: String) async throws -> [FileEntry] {
+        switch side {
+        case .remote:
+            guard let client else { return [] }
+            return try await client.list(directory).map(FileEntry.init(remote:))
+        case .local:
+            return try await Task.detached {
+                try FileManager.default.contentsOfDirectory(
+                    at: URL(fileURLWithPath: directory),
+                    includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey,
+                                                 .contentModificationDateKey]
+                ).compactMap(FileEntry.init(local:))
+            }.value
+        }
+    }
+
+    // MARK: - ファイル操作
+
+    func makeFolder(named name: String) async {
+        let target = RemotePath.join(path, name)
+        await perform {
+            if let client = self.client {
+                try await client.makeDirectory(target)
+            } else {
+                try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: false)
+            }
+        }
+    }
+
+    func rename(_ entry: FileEntry, to name: String) async {
+        let target = RemotePath.join(RemotePath.parent(of: entry.path), name)
+        await perform {
+            if let client = self.client {
+                try await client.rename(entry.path, to: target)
+            } else {
+                try FileManager.default.moveItem(atPath: entry.path, toPath: target)
+            }
+        }
+    }
+
+    /// リモートは完全に削除、ローカルはゴミ箱に入れる
+    func delete(_ targets: [FileEntry]) async {
+        await perform {
+            for entry in targets {
+                if let client = self.client {
+                    let item = RemoteItem(name: entry.name, path: entry.path,
+                                          kind: entry.isDirectory ? .directory : .file)
+                    try await client.deleteRecursively(item)
+                } else {
+                    try FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: nil)
+                }
+            }
+        }
+    }
+
+    func changePermissions(_ targets: [FileEntry], mode: String) async {
+        guard let client else { return }
+        await perform {
+            for entry in targets {
+                try await client.changePermissions(entry.path, mode: mode)
+            }
+        }
+    }
+
+    private func perform(_ operation: @escaping () async throws -> Void) async {
+        var failure: String?
+        do {
+            try await operation()
+        } catch {
+            failure = error.localizedDescription
+        }
+        await refresh()
+        // refresh が成功するとエラー表示が消えるので、操作のエラーは後から設定する
+        if let failure {
+            errorMessage = failure
+        }
+    }
+}

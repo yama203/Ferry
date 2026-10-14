@@ -6,7 +6,7 @@ let curlPrefix = "/opt/homebrew/opt/curl"
 
 let package = Package(
     name: "FerryKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "FerryKit", targets: ["FerryKit"]),
         .executable(name: "ferry-cli", targets: ["ferry-cli"]),
