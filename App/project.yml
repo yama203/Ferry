@@ -33,10 +33,10 @@ targets:
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
-        # 自分用の自己署名証明書で署名（ビルドし直してもキーチェーンの許可が保たれる）。サンドボックスなし（iCloud Drive のフォルダと Homebrew の libcurl を使うため）
-        CODE_SIGN_IDENTITY: "Shelf Dev Signing"
+        # 無料の Apple Development 証明書で署名。チーム ID があるとビルドし直してもキーチェーンの許可が保たれる。サンドボックスなし（iCloud Drive のフォルダと Homebrew の libcurl を使うため）
+        CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: Manual
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: 4AU22553B4
         ENABLE_HARDENED_RUNTIME: NO
         ENABLE_APP_SANDBOX: NO
         ENABLE_USER_SCRIPT_SANDBOXING: NO
