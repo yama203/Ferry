@@ -7,6 +7,7 @@ struct ServerEditView: View {
     let onSave: (ServerConfig, String) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(ServerStore.self) private var store
     @State private var draft: ServerConfig
     @State private var password: String
     @State private var portText: String
@@ -31,6 +32,14 @@ struct ServerEditView: View {
             Form {
                 Section {
                     TextField("名前", text: $draft.name, prompt: Text(draft.host.isEmpty ? "例: 本番サーバー" : draft.host))
+                    if !store.folders.isEmpty {
+                        Picker("フォルダ", selection: $draft.folderID) {
+                            Text("なし").tag(UUID?.none)
+                            ForEach(store.folders) { folder in
+                                Text(folder.name).tag(Optional(folder.id))
+                            }
+                        }
+                    }
                     Picker("プロトコル", selection: $draft.serverProtocol) {
                         ForEach(ServerProtocol.allCases, id: \.self) { proto in
                             Text(proto.displayName).tag(proto)

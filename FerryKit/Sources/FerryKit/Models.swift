@@ -55,6 +55,8 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
     public var privateKeyPath: String?
     /// 接続直後に開くローカルのフォルダ
     public var localPath: String?
+    /// サイドバーのフォルダ。nil ならフォルダに入れない。
+    public var folderID: UUID?
 
     public init(
         id: UUID = UUID(),
@@ -67,7 +69,8 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
         passiveMode: Bool = true,
         verifyCertificate: Bool = true,
         privateKeyPath: String? = nil,
-        localPath: String? = nil
+        localPath: String? = nil,
+        folderID: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -80,6 +83,7 @@ public struct ServerConfig: Codable, Identifiable, Hashable, Sendable {
         self.verifyCertificate = verifyCertificate
         self.privateKeyPath = privateKeyPath
         self.localPath = localPath
+        self.folderID = folderID
     }
 
     public var effectivePort: Int { port ?? serverProtocol.defaultPort }

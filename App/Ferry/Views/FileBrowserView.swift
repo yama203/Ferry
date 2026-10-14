@@ -12,6 +12,12 @@ struct FileBrowserView: View {
     let onTransfer: ([FileEntry]) -> Void
     let dropTypes: [UTType]
     let onDrop: ([NSItemProvider]) -> Bool
+    /// リモート側のみ: ドラッグ用（Finder へのダウンロードに対応）
+    var remoteItemProvider: ((FileEntry) -> NSItemProvider)?
+    /// リモート側のみ: エディタで開いて自動アップロード
+    var onEdit: ((FileEntry) -> Void)?
+    /// 右のペインとの同期
+    var onSync: (() -> Void)?
 
     @State private var isDropTargeted = false
     @State private var renameTarget: FileEntry?
@@ -108,6 +114,10 @@ struct FileBrowserView: View {
                     .help("再読み込み")
                 Menu {
                     Button("新規フォルダ…") { startCreatingFolder() }
+                    if let onSync {
+                        Button("同期…", action: onSync)
+                    }
+                    Divider()
                     Toggle("隠しファイルを表示", isOn: $model.showHidden)
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -214,6 +224,9 @@ struct FileBrowserView: View {
     private func contextMenu(for targets: [FileEntry]) -> some View {
         if !targets.isEmpty {
             Button(transferLabel) { onTransfer(targets) }
+            if let onEdit, targets.count == 1, let target = targets.first, !target.isDirectory {
+                Button("エディタで開く") { onEdit(target) }
+            }
             Divider()
             if targets.count == 1, let target = targets.first {
                 Button("名前を変更…") {
@@ -302,17 +315,10 @@ struct FileBrowserView: View {
     }
 
     private func itemProvider(for entry: FileEntry) -> NSItemProvider {
-        if model.side == .local {
-            return NSItemProvider(contentsOf: URL(fileURLWithPath: entry.path)) ?? NSItemProvider()
+        if let remoteItemProvider {
+            return remoteItemProvider(entry)
         }
-        let provider = NSItemProvider()
-        let data = try? JSONEncoder().encode([entry])
-        provider.registerDataRepresentation(forTypeIdentifier: UTType.ferryRemoteItem.identifier,
-                                            visibility: .ownProcess) { completion in
-            completion(data, nil)
-            return nil
-        }
-        return provider
+        return NSItemProvider(contentsOf: URL(fileURLWithPath: entry.path)) ?? NSItemProvider()
     }
 
     private func octalPermissions(_ entry: FileEntry) -> String {

@@ -11,6 +11,12 @@ public struct FerryError: Error, LocalizedError, Sendable {
     /// libcurl が返した詳細（サーバーの応答など）
     public let detail: String?
 
+    public init(kind: Kind, message: String, detail: String?) {
+        self.kind = kind
+        self.message = message
+        self.detail = detail
+    }
+
     public var errorDescription: String? {
         if let detail, !detail.isEmpty { return "\(message)\n\(detail)" }
         return message

@@ -8,6 +8,8 @@ struct ContentView: View {
     /// 前回開いていた接続先を次回起動時に開く
     @AppStorage("lastServerID") private var lastServerID = ""
     @State private var editor: EditorRequest?
+    /// ウィンドウが狭くてもサイドバーを自動で隠さない
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     struct EditorRequest: Identifiable {
         var server: ServerConfig
@@ -16,9 +18,10 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             ServerSidebar(selection: $selection, editor: $editor)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             if let id = selection, let server = store.server(withID: id) {
                 SessionView(session: sessions.session(for: server), onEdit: {
@@ -30,6 +33,9 @@ struct ContentView: View {
                     editor = EditorRequest(server: .newDraft, isNew: true)
                 }
             }
+        }
+        .onChange(of: columnVisibility) {
+            if columnVisibility != .all { columnVisibility = .all }
         }
         .onAppear {
             if selection == nil, let id = UUID(uuidString: lastServerID), store.server(withID: id) != nil {

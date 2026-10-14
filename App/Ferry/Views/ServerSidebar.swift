@@ -6,22 +6,40 @@ struct ServerSidebar: View {
     @Environment(SessionManager.self) private var sessions
     @Binding var selection: UUID?
     @Binding var editor: ContentView.EditorRequest?
+
+    @AppStorage("collapsedFolders") private var collapsedFolders = ""
     @State private var pendingDelete: ServerConfig?
+    @State private var pendingFolderDelete: ServerFolder?
+    @State private var folderNameTarget: FolderNameTarget?
+    @State private var folderName = ""
+
+    private enum FolderNameTarget: Identifiable {
+        case new
+        case rename(ServerFolder)
+        var id: String {
+            switch self {
+            case .new: "new"
+            case .rename(let folder): folder.id.uuidString
+            }
+        }
+    }
 
     var body: some View {
         List(selection: $selection) {
-            Section("接続先") {
-                ForEach(store.servers) { server in
-                    ServerRow(server: server)
-                        .tag(server.id)
-                        .contextMenu {
-                            Button("編集…") { editor = .init(server: server, isNew: false) }
-                            Button("複製") { duplicate(server) }
-                            Divider()
-                            Button("削除…", role: .destructive) { pendingDelete = server }
-                        }
+            ForEach(store.folders) { folder in
+                Section(isExpanded: expansion(of: folder)) {
+                    rows(for: store.servers(inFolder: folder.id))
+                } header: {
+                    folderHeader(folder)
                 }
-                .onMove { store.move(from: $0, to: $1) }
+            }
+            Section {
+                rows(for: store.servers(inFolder: nil))
+            } header: {
+                Text(store.folders.isEmpty ? "接続先" : "フォルダなし")
+                    .dropDestination(for: String.self) { ids, _ in
+                        moveServers(ids, to: nil)
+                    }
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -37,16 +55,16 @@ struct ServerSidebar: View {
         }
         .toolbar {
             ToolbarItem {
-                Button {
-                    editor = .init(server: .newDraft, isNew: true)
+                Menu {
+                    Button("接続先を追加…") { editor = .init(server: .newDraft, isNew: true) }
+                    Button("フォルダを追加…") { startFolderName(.new) }
                 } label: {
-                    Label("接続先を追加", systemImage: "plus")
+                    Label("追加", systemImage: "plus")
                 }
             }
         }
         .confirmationDialog("「\(pendingDelete?.name ?? "")」を削除しますか？",
-                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                            presenting: pendingDelete) { server in
+                            isPresented: isPresent($pendingDelete), presenting: pendingDelete) { server in
             Button("削除", role: .destructive) {
                 sessions.close(server.id)
                 if selection == server.id { selection = nil }
@@ -54,6 +72,102 @@ struct ServerSidebar: View {
             }
         } message: { _ in
             Text("保存したパスワードも削除されます。")
+        }
+        .confirmationDialog("フォルダ「\(pendingFolderDelete?.name ?? "")」を削除しますか？",
+                            isPresented: isPresent($pendingFolderDelete), presenting: pendingFolderDelete) { folder in
+            Button("削除", role: .destructive) { store.deleteFolder(folder.id) }
+        } message: { _ in
+            Text("中の接続先は削除されず、フォルダの外に移動します。")
+        }
+        .alert(folderNameTarget.map { if case .new = $0 { "新規フォルダ" } else { "フォルダ名を変更" } } ?? "",
+               isPresented: isPresent($folderNameTarget)) {
+            TextField("フォルダ名", text: $folderName)
+            Button("OK") { commitFolderName() }
+            Button("キャンセル", role: .cancel) {}
+        }
+    }
+
+    // MARK: - 部品
+
+    private func rows(for servers: [ServerConfig]) -> some View {
+        ForEach(servers.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { server in
+            ServerRow(server: server)
+                .tag(server.id)
+                .draggable(server.id.uuidString)
+                .contextMenu { serverMenu(server) }
+        }
+    }
+
+    @ViewBuilder private func serverMenu(_ server: ServerConfig) -> some View {
+        Button("編集…") { editor = .init(server: server, isNew: false) }
+        Button("複製") { duplicate(server) }
+        if !store.folders.isEmpty {
+            Menu("フォルダへ移動") {
+                Button("フォルダなし") { store.moveServer(server.id, toFolder: nil) }
+                    .disabled(server.folderID == nil)
+                Divider()
+                ForEach(store.folders) { folder in
+                    Button(folder.name) { store.moveServer(server.id, toFolder: folder.id) }
+                        .disabled(server.folderID == folder.id)
+                }
+            }
+        }
+        Divider()
+        Button("削除…", role: .destructive) { pendingDelete = server }
+    }
+
+    private func folderHeader(_ folder: ServerFolder) -> some View {
+        Label(folder.name, systemImage: "folder")
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self) { ids, _ in
+                moveServers(ids, to: folder.id)
+            }
+            .contextMenu {
+                Button("名前を変更…") { startFolderName(.rename(folder)) }
+                Button("接続先を追加…") {
+                    var draft = ServerConfig.newDraft
+                    draft.folderID = folder.id
+                    editor = .init(server: draft, isNew: true)
+                }
+                Divider()
+                Button("フォルダを削除…", role: .destructive) { pendingFolderDelete = folder }
+            }
+    }
+
+    // MARK: - 操作
+
+    private func expansion(of folder: ServerFolder) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedFolders.contains(folder.id.uuidString) },
+            set: { expanded in
+                var ids = Set(collapsedFolders.split(separator: ",").map(String.init))
+                if expanded { ids.remove(folder.id.uuidString) } else { ids.insert(folder.id.uuidString) }
+                collapsedFolders = ids.joined(separator: ",")
+            }
+        )
+    }
+
+    private func moveServers(_ ids: [String], to folderID: UUID?) -> Bool {
+        let uuids = ids.compactMap(UUID.init(uuidString:))
+        uuids.forEach { store.moveServer($0, toFolder: folderID) }
+        return !uuids.isEmpty
+    }
+
+    private func startFolderName(_ target: FolderNameTarget) {
+        if case .rename(let folder) = target {
+            folderName = folder.name
+        } else {
+            folderName = ""
+        }
+        folderNameTarget = target
+    }
+
+    private func commitFolderName() {
+        let name = folderName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, let target = folderNameTarget else { return }
+        switch target {
+        case .new: store.addFolder(named: name)
+        case .rename(let folder): store.renameFolder(folder.id, to: name)
         }
     }
 
@@ -63,6 +177,10 @@ struct ServerSidebar: View {
         copy.name += " のコピー"
         Keychain.setPassword(Keychain.password(for: server.id), for: copy.id)
         store.upsert(copy)
+    }
+
+    private func isPresent<T>(_ binding: Binding<T?>) -> Binding<Bool> {
+        Binding(get: { binding.wrappedValue != nil }, set: { if !$0 { binding.wrappedValue = nil } })
     }
 }
 
