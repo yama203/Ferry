@@ -20,6 +20,7 @@ struct SessionView: View {
                     onTransfer: { entries in Task { await session.upload(entries) } },
                     dropTypes: [.ferryRemoteItem],
                     onDrop: handleRemoteItemsDropped,
+                    dragWriter: { NSURL(fileURLWithPath: $0.path) },
                     onSync: session.status == .connected ? { isSyncing = true } : nil
                 )
                 .frame(minWidth: 260, maxWidth: .infinity)
@@ -145,7 +146,7 @@ struct SessionView: View {
                 onTransfer: { entries in Task { await session.download(entries) } },
                 dropTypes: [.fileURL],
                 onDrop: handleLocalFilesDropped,
-                remoteItemProvider: { session.itemProvider(forRemote: $0) },
+                dragWriter: { session.dragWriter(forRemote: $0) },
                 onEdit: { entry in Task { await session.edit(entry) } },
                 onSync: { isSyncing = true }
             )
@@ -153,40 +154,25 @@ struct SessionView: View {
     }
 
     /// 右のペインからドロップされたリモートの項目をダウンロード
-    private func handleRemoteItemsDropped(_ providers: [NSItemProvider]) -> Bool {
-        let matching = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.ferryRemoteItem.identifier) }
-        guard !matching.isEmpty else { return false }
-        Task {
-            var entries: [FileEntry] = []
-            for provider in matching {
-                if let data = try? await provider.loadData(forType: .ferryRemoteItem),
-                   let decoded = try? JSONDecoder().decode([FileEntry].self, from: data) {
-                    entries += decoded
-                }
-            }
-            await session.download(entries)
+    private func handleRemoteItemsDropped(_ pasteboard: NSPasteboard) -> Bool {
+        let entries = (pasteboard.pasteboardItems ?? []).flatMap { item -> [FileEntry] in
+            guard let data = item.data(forType: .ferryRemoteItem) else { return [] }
+            return (try? JSONDecoder().decode([FileEntry].self, from: data)) ?? []
         }
+        guard !entries.isEmpty else { return false }
+        Task { await session.download(entries) }
         return true
     }
 
     /// 左のペインや Finder からドロップされたファイルをアップロード
-    private func handleLocalFilesDropped(_ providers: [NSItemProvider]) -> Bool {
+    private func handleLocalFilesDropped(_ pasteboard: NSPasteboard) -> Bool {
         // 右のペイン自身からのドラッグは無視する（同じ場所へ再アップロードしないように）
-        let matching = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-                && !$0.hasItemConformingToTypeIdentifier(UTType.ferryRemoteItem.identifier)
-        }
-        guard !matching.isEmpty, session.status == .connected else { return false }
-        Task {
-            var urls: [URL] = []
-            for provider in matching {
-                if let url = try? await provider.loadFileURL() {
-                    urls.append(url)
-                }
-            }
-            // まとめて追加すると上書き確認が 1 回で済む
-            await session.upload(urls: urls)
-        }
+        guard session.status == .connected, pasteboard.availableType(from: [.ferryRemoteItem]) == nil,
+              let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                                options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else { return false }
+        // まとめて追加すると上書き確認が 1 回で済む
+        Task { await session.upload(urls: urls) }
         return true
     }
 }
@@ -215,23 +201,5 @@ private struct EditingMenu: View {
             Label("編集中 \(watcher.files.count)", systemImage: "pencil.circle")
         }
         .help("エディタで編集中のファイル")
-    }
-}
-
-private extension NSItemProvider {
-    func loadData(forType type: UTType) async throws -> Data? {
-        try await withCheckedThrowingContinuation { continuation in
-            _ = loadDataRepresentation(forTypeIdentifier: type.identifier) { data, error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: data) }
-            }
-        }
-    }
-
-    func loadFileURL() async throws -> URL? {
-        try await withCheckedThrowingContinuation { continuation in
-            _ = loadObject(ofClass: URL.self) { url, error in
-                if let error { continuation.resume(throwing: error) } else { continuation.resume(returning: url) }
-            }
-        }
     }
 }

@@ -10,10 +10,10 @@ struct FileBrowserView: View {
     /// 反対側のペインへ転送する操作（「アップロード」「ダウンロード」）
     let transferLabel: String
     let onTransfer: ([FileEntry]) -> Void
-    let dropTypes: [UTType]
-    let onDrop: ([NSItemProvider]) -> Bool
-    /// リモート側のみ: ドラッグ用（Finder へのダウンロードに対応）
-    var remoteItemProvider: ((FileEntry) -> NSItemProvider)?
+    let dropTypes: [NSPasteboard.PasteboardType]
+    let onDrop: (NSPasteboard) -> Bool
+    /// ドラッグで渡すもの（リモートは Finder へのダウンロードに対応したもの）
+    let dragWriter: (FileEntry) -> NSPasteboardWriting?
     /// リモート側のみ: エディタで開いて自動アップロード
     var onEdit: ((FileEntry) -> Void)?
     /// 右のペインとの同期
@@ -159,103 +159,70 @@ struct FileBrowserView: View {
     }
 
     private var table: some View {
-        Table(of: FileEntry.self, selection: $model.selection, sortOrder: $model.sortOrder) {
-            TableColumn("名前", value: \.name, comparator: .localizedStandard) { entry in
-                HStack(spacing: 6) {
-                    Image(nsImage: FileIcons.icon(for: entry, isLocal: model.side == .local))
-                        .resizable()
-                        .frame(width: 16, height: 16)
-                    Text(entry.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if entry.isSymlink {
-                        Image(systemName: "arrow.turn.up.right")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .opacity(entry.isHidden ? 0.6 : 1)
-            }
-            .width(min: 140, ideal: 260)
-
-            TableColumn("サイズ", value: \.sortSize) { entry in
-                Text(Formatters.size(entry))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            .width(min: 60, ideal: 80)
-
-            TableColumn("更新日", value: \.sortDate) { entry in
-                Text(Formatters.date(entry.modified))
-                    .foregroundStyle(.secondary)
-            }
-            .width(min: 100, ideal: 150)
-
-            if model.side == .remote {
-                TableColumn("権限") { entry in
-                    Text(entry.permissions ?? "")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-                .width(min: 70, ideal: 90)
-            }
-        } rows: {
-            ForEach(model.visibleEntries) { entry in
-                TableRow(entry)
-                    .itemProvider { itemProvider(for: entry) }
-            }
-        }
-        .contextMenu(forSelectionType: FileEntry.ID.self) { ids in
-            contextMenu(for: model.entries.filter { ids.contains($0.id) })
-        } primaryAction: { ids in
-            guard ids.count == 1, let entry = model.entries.first(where: { ids.contains($0.id) }) else { return }
-            // リモートのファイルはダブルクリックでダウンロード
-            if model.side == .remote && !entry.isDirectory && !entry.isSymlink {
-                onTransfer([entry])
-            } else {
-                Task { await model.open(entry) }
-            }
-        }
-        .onDeleteCommand { requestDelete(model.selectedEntries) }
-        .onDrop(of: dropTypes, isTargeted: $isDropTargeted, perform: onDrop)
+        FileTableView(
+            entries: model.visibleEntries,
+            selection: $model.selection,
+            sortKey: $model.sortKey,
+            ascending: $model.ascending,
+            isLocal: model.side == .local,
+            autosaveName: model.side == .local ? "Ferry.LocalFiles" : "Ferry.RemoteFiles",
+            onOpen: open,
+            onDelete: requestDelete,
+            menuItems: menuItems(for:),
+            dragWriter: dragWriter,
+            dropTypes: dropTypes,
+            onDrop: onDrop,
+            isDropTargeted: $isDropTargeted
+        )
     }
 
-    @ViewBuilder
-    private func contextMenu(for targets: [FileEntry]) -> some View {
+    private func open(_ entry: FileEntry) {
+        // リモートのファイルはダブルクリックでダウンロード
+        if model.side == .remote && !entry.isDirectory && !entry.isSymlink {
+            onTransfer([entry])
+        } else {
+            Task { await model.open(entry) }
+        }
+    }
+
+    private func menuItems(for targets: [FileEntry]) -> [MenuAction] {
+        var items: [MenuAction] = []
         if !targets.isEmpty {
-            Button(transferLabel) { onTransfer(targets) }
-            if let onEdit, targets.count == 1, let target = targets.first, !target.isDirectory {
-                Button("エディタで開く") { onEdit(target) }
+            items.append(MenuAction(title: transferLabel) { onTransfer(targets) })
+            if let onEdit, targets.count == 1, !targets[0].isDirectory {
+                items.append(MenuAction(title: "エディタで開く") { onEdit(targets[0]) })
             }
-            Divider()
-            if targets.count == 1, let target = targets.first {
-                Button("名前を変更…") {
+            items.append(.separator)
+            if targets.count == 1 {
+                let target = targets[0]
+                items.append(MenuAction(title: "名前を変更…") {
                     nameText = target.name
                     renameTarget = target
-                }
+                })
             }
             if model.side == .remote {
-                Button("パーミッション…") {
+                items.append(MenuAction(title: "パーミッション…") {
                     permissionText = targets.count == 1 ? octalPermissions(targets[0]) : ""
                     permissionTargets = targets
-                }
+                })
             } else {
-                Button("Finder で表示") {
+                items.append(MenuAction(title: "Finder で表示") {
                     NSWorkspace.shared.activateFileViewerSelecting(targets.map { URL(fileURLWithPath: $0.path) })
-                }
+                })
             }
-            Button("パスをコピー") {
+            items.append(MenuAction(title: "パスをコピー") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(targets.map(\.path).joined(separator: "\n"), forType: .string)
-            }
-            Divider()
-            Button(model.side == .local ? "ゴミ箱に入れる" : "削除…", role: .destructive) {
+            })
+            items.append(.separator)
+            items.append(MenuAction(title: model.side == .local ? "ゴミ箱に入れる" : "削除…", isDestructive: true) {
                 requestDelete(targets)
-            }
-            Divider()
+            })
+            items.append(.separator)
         }
-        Button("新規フォルダ…") { startCreatingFolder() }
-        Button("再読み込み") { Task { await model.refresh() } }
+        items.append(MenuAction(title: "新規フォルダ…") { startCreatingFolder() })
+        items.append(MenuAction(title: "再読み込み") { Task { await model.refresh() } })
+        return items
     }
 
     @ViewBuilder private var errorBanner: some View {
@@ -312,13 +279,6 @@ struct FileBrowserView: View {
     private func startCreatingFolder() {
         nameText = ""
         isCreatingFolder = true
-    }
-
-    private func itemProvider(for entry: FileEntry) -> NSItemProvider {
-        if let remoteItemProvider {
-            return remoteItemProvider(entry)
-        }
-        return NSItemProvider(contentsOf: URL(fileURLWithPath: entry.path)) ?? NSItemProvider()
     }
 
     private func octalPermissions(_ entry: FileEntry) -> String {

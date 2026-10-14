@@ -135,37 +135,67 @@ final class ServerSession {
     // MARK: - ドラッグ
 
     /// リモートの項目のドラッグ。アプリ内（左のペイン）には項目の情報を、Finder にはダウンロードしたファイルを渡す。
-    func itemProvider(forRemote entry: FileEntry) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.suggestedName = entry.name
-
-        let data = try? JSONEncoder().encode([entry])
-        provider.registerDataRepresentation(forTypeIdentifier: UTType.ferryRemoteItem.identifier,
-                                            visibility: .ownProcess) { completion in
-            completion(data, nil)
-            return nil
-        }
-
+    func dragWriter(forRemote entry: FileEntry) -> NSPasteboardWriting {
         let type = entry.isDirectory ? UTType.folder
             : UTType(filenameExtension: (entry.name as NSString).pathExtension) ?? .data
-        provider.registerFileRepresentation(forTypeIdentifier: type.identifier, fileOptions: [],
-                                            visibility: .all) { [weak self] completion in
-            let progress = Progress(totalUnitCount: 1)
-            Task { @MainActor in
-                guard let self else { return completion(nil, false, nil) }
-                let directory = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("Ferry-Drag/\(UUID().uuidString)")
-                do {
-                    try await self.transfers.downloadAndWait([entry], into: directory)
-                    completion(directory.appendingPathComponent(entry.name), false, nil)
-                } catch {
-                    completion(nil, false, error)
-                }
-                progress.completedUnitCount = 1
-            }
-            return progress
-        }
+        let provider = RemoteFilePromiseProvider(fileType: type.identifier, delegate: promiseDelegate)
+        provider.userInfo = entry
         return provider
+    }
+
+    @ObservationIgnored private lazy var promiseDelegate = RemoteFilePromiseDelegate(session: self)
+
+    /// Finder へのドロップ先にダウンロードする
+    fileprivate func downloadForPromise(_ entry: FileEntry, to destination: URL) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Ferry-Drag/\(UUID().uuidString)")
+        try await transfers.downloadAndWait([entry], into: directory)
+        try FileManager.default.moveItem(at: directory.appendingPathComponent(entry.name), to: destination)
+        try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+/// Finder にはファイルプロミス、Ferry の左のペインには項目の情報（JSON）を渡す
+final class RemoteFilePromiseProvider: NSFilePromiseProvider {
+    override func writableTypes(for pasteboard: NSPasteboard) -> [NSPasteboard.PasteboardType] {
+        super.writableTypes(for: pasteboard) + [.ferryRemoteItem]
+    }
+
+    override func pasteboardPropertyList(forType type: NSPasteboard.PasteboardType) -> Any? {
+        if type == .ferryRemoteItem, let entry = userInfo as? FileEntry {
+            return try? JSONEncoder().encode([entry])
+        }
+        return super.pasteboardPropertyList(forType: type)
+    }
+}
+
+final class RemoteFilePromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
+    private weak var session: ServerSession?
+    private let queue = OperationQueue()
+
+    init(session: ServerSession) {
+        self.session = session
+    }
+
+    func filePromiseProvider(_ provider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+        (provider.userInfo as? FileEntry)?.name ?? "download"
+    }
+
+    func operationQueue(for provider: NSFilePromiseProvider) -> OperationQueue {
+        queue
+    }
+
+    func filePromiseProvider(_ provider: NSFilePromiseProvider, writePromiseTo url: URL,
+                             completionHandler: @escaping (Error?) -> Void) {
+        guard let entry = provider.userInfo as? FileEntry else { return completionHandler(nil) }
+        Task { @MainActor [weak session] in
+            guard let session else { return completionHandler(nil) }
+            do {
+                try await session.downloadForPromise(entry, to: url)
+                completionHandler(nil)
+            } catch {
+                completionHandler(error)
+            }
+        }
     }
 }
 

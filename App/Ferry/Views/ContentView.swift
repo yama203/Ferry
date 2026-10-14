@@ -21,7 +21,6 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             ServerSidebar(selection: $selection, editor: $editor)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 320)
-                .toolbar(removing: .sidebarToggle)
         } detail: {
             if let id = selection, let server = store.server(withID: id) {
                 SessionView(session: sessions.session(for: server), onEdit: {
@@ -33,9 +32,6 @@ struct ContentView: View {
                     editor = EditorRequest(server: .newDraft, isNew: true)
                 }, onImport: store.chooseTransmitFile)
             }
-        }
-        .onChange(of: columnVisibility) {
-            if columnVisibility != .all { columnVisibility = .all }
         }
         .onAppear {
             if selection == nil, let id = UUID(uuidString: lastServerID), store.server(withID: id) != nil {

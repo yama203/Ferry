@@ -52,6 +52,7 @@ struct ServerSidebar: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .background(.bar)
         }
         .toolbar {
             ToolbarItem {

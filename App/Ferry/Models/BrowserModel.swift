@@ -7,6 +7,7 @@ import Observation
 @MainActor @Observable
 final class BrowserModel {
     enum Side { case local, remote }
+    enum SortKey: String { case name, size, date }
 
     let side: Side
     /// リモート側の一覧表示・ファイル操作用。転送は TransferQueue が別の接続で行う。
@@ -17,7 +18,8 @@ final class BrowserModel {
     private(set) var isLoading = false
     var errorMessage: String?
     var selection = Set<FileEntry.ID>()
-    var sortOrder = [KeyPathComparator(\FileEntry.name, comparator: .localizedStandard)]
+    var sortKey = SortKey.name
+    var ascending = true
     var showHidden: Bool
 
     private var history: [String] = []
@@ -35,9 +37,23 @@ final class BrowserModel {
     /// フォルダが先、その中で選択中の並び順
     var visibleEntries: [FileEntry] {
         let shown = showHidden ? entries : entries.filter { !$0.isHidden }
-        let folders = shown.filter(\.isDirectory).sorted(using: sortOrder)
-        let files = shown.filter { !$0.isDirectory }.sorted(using: sortOrder)
+        let folders = shown.filter(\.isDirectory).sorted(by: isOrderedBefore)
+        let files = shown.filter { !$0.isDirectory }.sorted(by: isOrderedBefore)
         return folders + files
+    }
+
+    private func isOrderedBefore(_ a: FileEntry, _ b: FileEntry) -> Bool {
+        let result: ComparisonResult
+        switch sortKey {
+        case .name: result = a.name.localizedStandardCompare(b.name)
+        case .size: result = a.sortSize == b.sortSize ? .orderedSame : (a.sortSize < b.sortSize ? .orderedAscending : .orderedDescending)
+        case .date: result = a.sortDate.compare(b.sortDate)
+        }
+        // 同じ値なら名前順
+        if result == .orderedSame {
+            return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+        return ascending ? result == .orderedAscending : result == .orderedDescending
     }
 
     var selectedEntries: [FileEntry] {
