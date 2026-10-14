@@ -8,6 +8,8 @@ struct ServerSidebar: View {
     @Binding var editor: ContentView.EditorRequest?
 
     @AppStorage("collapsedFolders") private var collapsedFolders = ""
+    /// 閉じているフォルダ。@AppStorage を直接使うとアニメーションしないため、画面内の状態として持つ。
+    @State private var collapsedIDs: Set<String> = []
     @State private var pendingDelete: ServerConfig?
     @State private var pendingFolderDelete: ServerFolder?
     @State private var folderNameTarget: FolderNameTarget?
@@ -27,6 +29,12 @@ struct ServerSidebar: View {
 
     var body: some View {
         dialogs(list)
+            .onAppear {
+                collapsedIDs = Set(collapsedFolders.split(separator: ",").map(String.init))
+            }
+            .onChange(of: collapsedIDs) {
+                collapsedFolders = collapsedIDs.sorted().joined(separator: ",")
+            }
     }
 
     private var list: some View {
@@ -201,8 +209,7 @@ struct ServerSidebar: View {
             .contentShape(Rectangle())
             // 矢印だけでなくフォルダ名を押しても開閉する
             .onTapGesture {
-                let expansion = expansion(of: folder)
-                withAnimation { expansion.wrappedValue.toggle() }
+                expansion(of: folder).wrappedValue.toggle()
             }
             .dropDestination(for: String.self) { ids, _ in
                 moveServers(ids, to: folder.id)
@@ -223,11 +230,15 @@ struct ServerSidebar: View {
 
     private func expansion(of folder: ServerFolder) -> Binding<Bool> {
         Binding(
-            get: { !collapsedFolders.contains(folder.id.uuidString) },
+            get: { !collapsedIDs.contains(folder.id.uuidString) },
             set: { expanded in
-                var ids = Set(collapsedFolders.split(separator: ",").map(String.init))
-                if expanded { ids.remove(folder.id.uuidString) } else { ids.insert(folder.id.uuidString) }
-                collapsedFolders = ids.joined(separator: ",")
+                withAnimation(.snappy(duration: 0.25)) {
+                    if expanded {
+                        collapsedIDs.remove(folder.id.uuidString)
+                    } else {
+                        collapsedIDs.insert(folder.id.uuidString)
+                    }
+                }
             }
         )
     }
