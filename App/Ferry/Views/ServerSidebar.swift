@@ -197,7 +197,13 @@ struct ServerSidebar: View {
 
     private func folderHeader(_ folder: ServerFolder) -> some View {
         Label(folder.name, systemImage: "folder")
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            // 矢印だけでなくフォルダ名を押しても開閉する
+            .onTapGesture {
+                let expansion = expansion(of: folder)
+                withAnimation { expansion.wrappedValue.toggle() }
+            }
             .dropDestination(for: String.self) { ids, _ in
                 moveServers(ids, to: folder.id)
             }
