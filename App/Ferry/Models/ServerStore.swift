@@ -11,6 +11,9 @@ final class ServerStore {
     private(set) var excludeRules = ExcludeRules.defaults
     let fileURL: URL
     let isICloud: Bool
+    /// 読み込みの確認画面に渡す内容（メニューから開く）
+    var pendingImport: TransmitImporter.Result?
+    var importError: String?
 
     @ObservationIgnored private var presenter: FilePresenter?
 
@@ -149,6 +152,55 @@ final class ServerStore {
             servers[index].folderID = nil
         }
         save()
+    }
+
+    // MARK: - 読み込み
+
+    func chooseTransmitFile() {
+        switch TransmitImportPanel.choose() {
+        case .success(let result)?: pendingImport = result
+        case .failure(let error)?: importError = error.localizedDescription
+        case nil: break
+        }
+    }
+
+    /// Transmit から読み込んだ接続先を追加する。同じ接続先（ホスト・ユーザー・ポート・プロトコル）は飛ばす。
+    /// フォルダは同名のものがあればそこに入れる。戻り値は追加した件数。
+    @discardableResult
+    func importServers(_ result: TransmitImporter.Result) -> Int {
+        var added = 0
+        for importedFolder in result.folders {
+            var folderID: UUID?
+            if let name = importedFolder.name {
+                folderID = folders.first(where: { $0.name == name })?.id
+                if folderID == nil {
+                    let folder = ServerFolder(id: UUID(), name: name)
+                    folders.append(folder)
+                    folderID = folder.id
+                }
+            }
+            for var server in importedFolder.servers {
+                let exists = servers.contains {
+                    $0.host == server.host && $0.username == server.username
+                        && $0.effectivePort == server.effectivePort && $0.serverProtocol == server.serverProtocol
+                }
+                guard !exists else { continue }
+                server.folderID = folderID
+                servers.append(server)
+                added += 1
+            }
+        }
+        save()
+        return added
+    }
+
+    func duplicateCount(in result: TransmitImporter.Result) -> Int {
+        result.folders.flatMap(\.servers).filter { server in
+            servers.contains {
+                $0.host == server.host && $0.username == server.username
+                    && $0.effectivePort == server.effectivePort && $0.serverProtocol == server.serverProtocol
+            }
+        }.count
     }
 
     // MARK: - 除外ルール

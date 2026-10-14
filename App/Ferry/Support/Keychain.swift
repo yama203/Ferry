@@ -39,4 +39,22 @@ enum Keychain {
             SecItemAdd(item as CFDictionary, nil)
         }
     }
+
+    /// 他のアプリ（Transmit など）がキーチェーンに保存したインターネットパスワードを探す。
+    /// 他のアプリの項目なので、macOS がアクセスを許可するか確認を出す。
+    static func findInternetPassword(host: String, account: String) -> String? {
+        var query: [CFString: Any] = [
+            kSecClass: kSecClassInternetPassword,
+            kSecAttrServer: host,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        if !account.isEmpty {
+            query[kSecAttrAccount] = account
+        }
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 }

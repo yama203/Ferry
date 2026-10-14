@@ -58,6 +58,8 @@ struct ServerSidebar: View {
                 Menu {
                     Button("接続先を追加…") { editor = .init(server: .newDraft, isNew: true) }
                     Button("フォルダを追加…") { startFolderName(.new) }
+                    Divider()
+                    Button("Transmit から読み込む…") { store.chooseTransmitFile() }
                 } label: {
                     Label("追加", systemImage: "plus")
                 }

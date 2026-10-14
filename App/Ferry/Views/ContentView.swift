@@ -29,9 +29,9 @@ struct ContentView: View {
                 })
                 .id(server)
             } else {
-                WelcomeView(hasServers: !store.servers.isEmpty) {
+                WelcomeView(hasServers: !store.servers.isEmpty, onAdd: {
                     editor = EditorRequest(server: .newDraft, isNew: true)
-                }
+                }, onImport: store.chooseTransmitFile)
             }
         }
         .onChange(of: columnVisibility) {
@@ -44,6 +44,17 @@ struct ContentView: View {
         }
         .onChange(of: selection) {
             lastServerID = selection?.uuidString ?? ""
+        }
+        .sheet(isPresented: Binding(get: { store.pendingImport != nil }, set: { if !$0 { store.pendingImport = nil } })) {
+            if let result = store.pendingImport {
+                ImportView(result: result)
+            }
+        }
+        .alert("読み込めませんでした", isPresented: Binding(get: { store.importError != nil },
+                                                    set: { if !$0 { store.importError = nil } })) {
+            Button("OK") {}
+        } message: {
+            Text(store.importError ?? "")
         }
         .sheet(item: $editor) { request in
             ServerEditView(server: request.server, isNew: request.isNew) { server, password in
@@ -65,6 +76,7 @@ extension ServerConfig {
 private struct WelcomeView: View {
     let hasServers: Bool
     let onAdd: () -> Void
+    let onImport: () -> Void
 
     var body: some View {
         ContentUnavailableView {
@@ -74,6 +86,7 @@ private struct WelcomeView: View {
         } actions: {
             Button("接続先を追加…", action: onAdd)
                 .buttonStyle(.borderedProminent)
+            Button("Transmit から読み込む…", action: onImport)
         }
     }
 }

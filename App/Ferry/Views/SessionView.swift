@@ -112,7 +112,7 @@ struct SessionView: View {
         let place = "\(server.serverProtocol.displayName)  \(server.username)@\(server.host):\(server.effectivePort)"
         switch session.status {
         case .connecting: return "接続中…  " + place
-        case .failed: return "未接続  " + place
+        case .failed, .needsPassword: return "未接続  " + place
         default: return place
         }
     }
@@ -122,6 +122,9 @@ struct SessionView: View {
         case .idle, .connecting where session.remote.entries.isEmpty:
             ProgressView("\(session.server.host) に接続中…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .needsPassword(let message):
+            PasswordPrompt(session: session, message: message)
+                .id(message)
         case .failed(let message):
             ContentUnavailableView {
                 Label("接続できませんでした", systemImage: "exclamationmark.triangle")

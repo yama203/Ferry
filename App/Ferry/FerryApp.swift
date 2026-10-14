@@ -20,6 +20,11 @@ struct FerryApp: App {
         }
         .defaultSize(width: 1280, height: 800)
         .windowToolbarStyle(.unified)
+        .commands {
+            CommandGroup(after: .importExport) {
+                Button("Transmit から読み込む…") { store.chooseTransmitFile() }
+            }
+        }
 
         Settings {
             SettingsView()

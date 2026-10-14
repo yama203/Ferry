@@ -10,6 +10,8 @@ final class ServerSession {
     enum Status: Equatable {
         case idle, connecting, connected
         case failed(String)
+        /// パスワードが未保存、またはログインに失敗した（メッセージ付き）
+        case needsPassword(String?)
     }
 
     let server: ServerConfig
@@ -20,6 +22,8 @@ final class ServerSession {
     private(set) var status: Status = .idle
     /// 編集用にダウンロード中のファイル名
     private(set) var openingForEdit: String?
+    @ObservationIgnored private let transferClient: RemoteClient
+    @ObservationIgnored private var hasPassword: Bool
 
     init(server: ServerConfig, password: String?, excludeRules: @escaping () -> ExcludeRules) {
         self.server = server
@@ -27,8 +31,10 @@ final class ServerSession {
         // 一覧用と転送用で接続を分け、転送中でもフォルダを移動できるようにする
         let browseClient = RemoteClient(server: server, password: password)
         remote = BrowserModel(side: .remote, client: browseClient)
-        transfers = TransferQueue(client: RemoteClient(server: server, password: password), lister: browseClient,
-                                  excludeRules: excludeRules)
+        transferClient = RemoteClient(server: server, password: password)
+        transfers = TransferQueue(client: transferClient, lister: browseClient, excludeRules: excludeRules)
+        // 秘密鍵はパスフレーズ無しの場合もあるので、パスワード無しでも接続を試す
+        hasPassword = password != nil || server.privateKeyPath != nil || server.username == "anonymous"
         transfers.onIdle = { [weak self] in
             guard let self else { return }
             Task {
@@ -43,6 +49,10 @@ final class ServerSession {
 
     func connect() async {
         guard status != .connecting, let client = remote.client else { return }
+        guard hasPassword else {
+            status = .needsPassword(nil)
+            return
+        }
         status = .connecting
 
         if local.path.isEmpty {
@@ -52,21 +62,32 @@ final class ServerSession {
         }
 
         do {
-            let start: String
-            if let initial = server.initialPath, !initial.isEmpty {
-                start = initial
-            } else {
-                start = try await client.homeDirectory()
-            }
+            // ログインの確認を兼ねてホームを取得する
+            let home = try await client.homeDirectory()
+            let start = server.initialPath.flatMap { $0.isEmpty ? nil : $0 } ?? home
             await remote.load(start, recordHistory: false)
             if let message = remote.errorMessage, remote.entries.isEmpty {
                 status = .failed(message)
             } else {
                 status = .connected
             }
+        } catch let error as FerryError where error.kind == .loginFailed {
+            status = .needsPassword(error.localizedDescription)
         } catch {
             status = .failed(error.localizedDescription)
         }
+    }
+
+    /// 接続画面で入力されたパスワードで接続する
+    func connect(withPassword password: String, save: Bool) async {
+        remote.client?.setPassword(password)
+        transferClient.setPassword(password)
+        if save {
+            Keychain.setPassword(password, for: server.id)
+        }
+        hasPassword = true
+        status = .idle
+        await connect()
     }
 
     func close() {

@@ -7,7 +7,7 @@ public final class RemoteClient: @unchecked Sendable {
     public typealias Progress = @Sendable (_ done: Int64, _ total: Int64) -> Void
 
     public let server: ServerConfig
-    private let password: String?
+    private var password: String?
     private let queue: DispatchQueue
     private var handle: CurlHandle?
     /// MLSD 非対応のサーバーでは LIST に切り替える
@@ -26,6 +26,11 @@ public final class RemoteClient: @unchecked Sendable {
         self.server = server
         self.password = password
         queue = DispatchQueue(label: "Ferry.RemoteClient.\(server.host)")
+    }
+
+    /// パスワードを後から設定する（接続時に入力された場合など）。次の操作から使われる。
+    public func setPassword(_ password: String?) {
+        queue.async { self.password = password }
     }
 
     // MARK: - 公開 API
