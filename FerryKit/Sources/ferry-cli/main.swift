@@ -78,6 +78,8 @@ let server = ServerConfig(
 let password: String = ProcessInfo.processInfo.environment["FERRY_PASSWORD"]
     ?? String(cString: getpass(keyPath == nil ? "パスワード: " : "鍵のパスフレーズ: "))
 
+// アプリに同梱したルート証明書で検証する場合に指定する
+RemoteClient.caBundlePath = ProcessInfo.processInfo.environment["FERRY_CA_BUNDLE"]
 let client = RemoteClient(server: server, password: password)
 client.debugLog = verbose
 let rest = Array(args.dropFirst(2))

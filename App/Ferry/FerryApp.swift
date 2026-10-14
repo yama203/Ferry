@@ -1,3 +1,4 @@
+import FerryKit
 import SwiftUI
 
 @main
@@ -10,6 +11,8 @@ struct FerryApp: App {
         _store = State(initialValue: store)
         _sessions = State(initialValue: SessionManager(store: store))
         Notifier.setUp()
+        // 同梱したルート証明書を使う（Homebrew の無い Mac でも FTPS の証明書を検証できるように）
+        RemoteClient.caBundlePath = Bundle.main.path(forResource: "cacert", ofType: "pem")
     }
 
     var body: some Scene {

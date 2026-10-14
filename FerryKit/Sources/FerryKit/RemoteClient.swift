@@ -16,6 +16,9 @@ public final class RemoteClient: @unchecked Sendable {
     /// 通信ログを stderr に出す（PASS は伏せ字）
     public var debugLog = false
 
+    /// FTPS の証明書検証に使うルート証明書（アプリに同梱したもの）。nil なら libcurl の既定。
+    public static var caBundlePath: String?
+
     /// SFTP のホスト鍵を記録するファイル
     public static var knownHostsURL: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -197,6 +200,9 @@ public final class RemoteClient: @unchecked Sendable {
                 handle.set(CURLOPT_FTPPORT, "-")
             }
             if proto.usesTLS {
+                if let caBundle = Self.caBundlePath {
+                    handle.set(CURLOPT_CAINFO, caBundle)
+                }
                 handle.set(CURLOPT_SSL_VERIFYPEER, server.verifyCertificate)
                 handle.set(CURLOPT_SSL_VERIFYHOST, server.verifyCertificate ? 2 : 0)
             }
