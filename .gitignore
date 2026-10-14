@@ -6,3 +6,4 @@ DerivedData/
 .DS_Store
 App/build/
 App/Ferry.xcodeproj/
+App/Tools/IconConcepts/
