@@ -8,6 +8,8 @@ struct SettingsView: View {
                 .tabItem { Label("除外", systemImage: "line.3.horizontal.decrease.circle") }
             EditorSettings()
                 .tabItem { Label("エディタ", systemImage: "pencil") }
+            NotificationSettings()
+                .tabItem { Label("通知", systemImage: "bell") }
         }
         .frame(width: 520, height: 440)
     }
@@ -108,5 +110,23 @@ private struct EditorSettings: View {
             EditorApp.url = url
             appURL = url
         }
+    }
+}
+
+/// 通知を出す場面（Mac ごとの設定）
+private struct NotificationSettings: View {
+    @AppStorage("notifyTransfers") private var notifyTransfers = true
+    @AppStorage("notifySync") private var notifySync = true
+
+    var body: some View {
+        Form {
+            Toggle("アップロード・ダウンロードが完了したとき", isOn: $notifyTransfers)
+            Toggle("同期が完了したとき", isOn: $notifySync)
+            Text("1 回のドラッグやボタン操作で始めた転送ごとにまとめて通知します。エディタで保存したときの自動アップロードでは通知しません。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
     }
 }

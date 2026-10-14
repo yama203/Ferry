@@ -197,6 +197,7 @@ struct SyncView: View {
         let serverName = session.server.name
         let direction = direction
         let deletionCount = plan.deletions.count - deleteFailures
+        guard UserDefaults.standard.object(forKey: "notifySync") as? Bool ?? true else { return }
         Task { @MainActor in
             for item in items {
                 await item.waitUntilDone()

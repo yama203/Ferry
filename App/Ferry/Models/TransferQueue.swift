@@ -70,6 +70,7 @@ struct PendingConflict: Identifiable {
     let id = UUID()
     let direction: TransferItem.Direction
     let items: [TransferItem]
+    let notifies: Bool
     var conflictCount: Int { items.filter(\.destinationExists).count }
     var firstConflictName: String { items.first(where: \.destinationExists)?.name ?? "" }
 }
@@ -88,6 +89,8 @@ final class TransferQueue {
     @ObservationIgnored private var runner: Task<Void, Never>?
     /// 待ち行列が空になったとき（両ペインの再読み込み用）
     @ObservationIgnored var onIdle: (() -> Void)?
+    /// 完了通知に出す接続先の名前
+    @ObservationIgnored var serverName = ""
 
     init(client: RemoteClient, lister: RemoteClient, excludeRules: @escaping () -> ExcludeRules) {
         self.client = client
@@ -112,7 +115,7 @@ final class TransferQueue {
     func uploadEdited(_ url: URL, to remotePath: String) {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         submit([TransferItem(direction: .upload, localURL: url, remotePath: remotePath, total: Int64(size))],
-               direction: .upload, confirmOverwrite: false)
+               direction: .upload, confirmOverwrite: false, notifies: false)
     }
 
     /// フォルダは中のファイルに展開する。除外ルールはフォルダの中身にだけ適用する。
@@ -180,7 +183,7 @@ final class TransferQueue {
     /// Finder へのドラッグ用。一時フォルダへダウンロードし、終わるまで待つ。
     func downloadAndWait(_ entries: [FileEntry], into directory: URL) async throws {
         let batch = await collectDownloads(entries, into: directory)
-        submit(batch, direction: .download, confirmOverwrite: false)
+        submit(batch, direction: .download, confirmOverwrite: false, notifies: false)
         for item in batch {
             await item.waitUntilDone()
         }
@@ -229,14 +232,45 @@ final class TransferQueue {
 
     // MARK: - 上書き確認
 
-    private func submit(_ batch: [TransferItem], direction: TransferItem.Direction, confirmOverwrite: Bool = true) {
+    /// notifies: まとまりが全部終わったら通知する（編集の自動アップロードなどでは出さない）
+    private func submit(_ batch: [TransferItem], direction: TransferItem.Direction, confirmOverwrite: Bool = true,
+                        notifies: Bool = true) {
         guard !batch.isEmpty else { return }
         if confirmOverwrite, batch.contains(where: \.destinationExists) {
-            pendingConflicts.append(PendingConflict(direction: direction, items: batch))
+            pendingConflicts.append(PendingConflict(direction: direction, items: batch, notifies: notifies))
         } else {
-            items.append(contentsOf: batch)
-            pump()
+            start(batch, direction: direction, notifies: notifies)
         }
+    }
+
+    private func start(_ batch: [TransferItem], direction: TransferItem.Direction, notifies: Bool) {
+        guard !batch.isEmpty else { return }
+        items.append(contentsOf: batch)
+        pump()
+        guard notifies, UserDefaults.standard.object(forKey: "notifyTransfers") as? Bool ?? true else { return }
+        let serverName = serverName
+        Task {
+            await Notifier.requestAuthorization()
+            for item in batch {
+                await item.waitUntilDone()
+            }
+            Self.notifyFinished(batch, direction: direction, serverName: serverName)
+        }
+    }
+
+    private static func notifyFinished(_ batch: [TransferItem], direction: TransferItem.Direction, serverName: String) {
+        let finished = batch.filter { $0.state == .finished }
+        let failed = batch.filter { if case .failed = $0.state { true } else { false } }.count
+        // すべて中止した場合は知らせない
+        guard !finished.isEmpty || failed > 0 else { return }
+
+        let action = direction == .upload ? "アップロード" : "ダウンロード"
+        let title = failed > 0 ? "\(action)が終わりました（失敗 \(failed) 件）" : "\(action)が完了しました"
+        var body = finished.first.map { $0.name } ?? ""
+        if finished.count > 1 {
+            body += " ほか \(finished.count - 1) 件"
+        }
+        Notifier.post(title: title, body: serverName.isEmpty ? body : "\(serverName)：\(body)")
     }
 
     /// policy が nil ならまとまりごと取りやめる
@@ -251,13 +285,12 @@ final class TransferQueue {
             case .newerOnly: return item.isSourceNewer
             }
         }
-        items.append(contentsOf: accepted)
-        pump()
+        start(accepted, direction: conflict.direction, notifies: conflict.notifies)
     }
 
-    /// 同期など、転送するものが確定しているまとまりを追加する
+    /// 同期など、転送するものが確定しているまとまりを追加する（通知は同期側で出す）
     func enqueuePlanned(_ batch: [TransferItem]) {
-        submit(batch, direction: batch.first?.direction ?? .upload, confirmOverwrite: false)
+        submit(batch, direction: batch.first?.direction ?? .upload, confirmOverwrite: false, notifies: false)
     }
 
     // MARK: - 操作

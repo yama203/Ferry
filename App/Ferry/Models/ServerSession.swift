@@ -35,6 +35,7 @@ final class ServerSession {
         remote = BrowserModel(side: .remote, client: browseClient)
         transferClient = RemoteClient(server: server, password: password)
         transfers = TransferQueue(client: transferClient, lister: browseClient, excludeRules: excludeRules)
+        transfers.serverName = server.name
         // 秘密鍵はパスフレーズ無しの場合もあるので、パスワード無しでも接続を試す
         hasPassword = password != nil || server.privateKeyPath != nil || server.username == "anonymous"
         transfers.onIdle = { [weak self] in
