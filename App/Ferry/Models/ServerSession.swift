@@ -12,6 +12,8 @@ final class ServerSession {
         case failed(String)
         /// パスワードが未保存、またはログインに失敗した（メッセージ付き）
         case needsPassword(String?)
+        /// FTPS の証明書を検証できなかった（自己署名など）
+        case untrustedCertificate(String)
     }
 
     let server: ServerConfig
@@ -73,6 +75,8 @@ final class ServerSession {
             }
         } catch let error as FerryError where error.kind == .loginFailed {
             status = .needsPassword(error.localizedDescription)
+        } catch let error as FerryError where error.kind == .untrustedCertificate {
+            status = .untrustedCertificate(error.localizedDescription)
         } catch {
             status = .failed(error.localizedDescription)
         }

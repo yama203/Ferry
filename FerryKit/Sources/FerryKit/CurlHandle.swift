@@ -3,7 +3,7 @@ import Foundation
 
 public struct FerryError: Error, LocalizedError, Sendable {
     public enum Kind: Sendable {
-        case cancelled, loginFailed, connectionFailed, tlsFailed, notFound, permissionDenied, other
+        case cancelled, loginFailed, connectionFailed, tlsFailed, untrustedCertificate, notFound, permissionDenied, other
     }
 
     public let kind: Kind
@@ -41,7 +41,7 @@ public struct FerryError: Error, LocalizedError, Sendable {
         case CURLE_USE_SSL_FAILED:
             (.tlsFailed, "サーバーが FTPS（Explicit）に対応していません。プロトコルを確認してください")
         case CURLE_PEER_FAILED_VERIFICATION:
-            (.tlsFailed, "サーバー証明書を検証できませんでした。共用サーバーの場合は「証明書を検証」をオフにすると接続できることがあります")
+            (.untrustedCertificate, "サーバー証明書を検証できませんでした（自己署名の証明書や、ホスト名が一致しない証明書など）")
         case CURLE_SSL_CONNECT_ERROR:
             (.tlsFailed, "TLS（暗号化）の接続に失敗しました。Explicit / Implicit の選択を確認してください")
         case CURLE_SSH:

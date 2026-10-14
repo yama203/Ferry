@@ -111,7 +111,7 @@ struct SessionView: View {
         let place = "\(server.serverProtocol.displayName)  \(server.username)@\(server.host):\(server.effectivePort)"
         switch session.status {
         case .connecting: return "接続中…  " + place
-        case .failed, .needsPassword: return "未接続  " + place
+        case .failed, .needsPassword, .untrustedCertificate: return "未接続  " + place
         default: return place
         }
     }
@@ -121,6 +121,21 @@ struct SessionView: View {
         case .idle, .connecting where session.remote.entries.isEmpty:
             ProgressView("\(session.server.host) に接続中…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .untrustedCertificate(let message):
+            ContentUnavailableView {
+                Label("証明書を確認できません", systemImage: "lock.trianglebadge.exclamationmark")
+            } description: {
+                Text(message + "\n\nレンタルサーバーの FTPS ではよくあることで、Transmit でも最初に「信頼する」を選んでいた可能性があります。接続先が正しいことが分かっていれば、検証せずに接続できます。通信の暗号化はそのまま行われます。")
+                    .textSelection(.enabled)
+            } actions: {
+                Button("証明書を検証せずに接続") {
+                    var server = session.server
+                    server.verifyCertificate = false
+                    store.upsert(server)
+                }
+                .buttonStyle(.borderedProminent)
+                Button("接続設定を編集…", action: onEdit)
+            }
         case .needsPassword(let message):
             PasswordPrompt(session: session, message: message)
                 .id(message)
