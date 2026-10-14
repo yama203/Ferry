@@ -10,6 +10,8 @@ struct PasswordPrompt: View {
     @State private var isSearching = false
     @State private var searchFailed = false
     @FocusState private var focused: Bool
+    @State private var master = ""
+    @State private var unlockError: String?
 
     var body: some View {
         VStack(spacing: 14) {
@@ -56,10 +58,44 @@ struct PasswordPrompt: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // 他の Mac でパスワード同期を始めていて、この Mac ではまだ解除していない場合
+            if Passwords.vault?.state == .locked {
+                Divider().frame(width: 300).padding(.vertical, 6)
+                Label("他の Mac で同期したパスワードを使う", systemImage: "key.icloud")
+                    .font(.headline)
+                HStack {
+                    SecureField("マスターパスワード", text: $master)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 200)
+                        .onSubmit(unlockVault)
+                    Button("解除", action: unlockVault)
+                        .disabled(master.isEmpty)
+                }
+            }
+            // 解除後も結果を表示するため、上の if の外に置く
+            if let unlockError {
+                Text(unlockError).font(.caption).foregroundStyle(.secondary)
+            }
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { focused = true }
+    }
+
+    private func unlockVault() {
+        guard let vault = Passwords.vault else { return }
+        do {
+            try vault.unlock(masterPassword: master)
+            unlockError = nil
+            if let synced = vault.password(for: session.server.id) {
+                Task { await session.connect(withPassword: synced, save: false) }
+            } else {
+                unlockError = "解除しました。この接続先のパスワードはまだ同期されていないので、上に入力してください"
+            }
+        } catch {
+            unlockError = error.localizedDescription
+        }
     }
 
     private func connect() {

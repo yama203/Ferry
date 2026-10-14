@@ -54,6 +54,12 @@ final class ServerSession {
 
     func connect() async {
         guard status != .connecting, let client = remote.client else { return }
+        // 画面を開いた後にパスワードが同期されてきた場合に備えて、もう一度探す
+        if !hasPassword, let password = Passwords.password(for: server.id) {
+            client.setPassword(password)
+            transferClient.setPassword(password)
+            hasPassword = true
+        }
         guard hasPassword else {
             status = .needsPassword(nil)
             return
