@@ -27,6 +27,8 @@ final class ServerSession {
     /// 編集用にダウンロード中のファイル名
     private(set) var openingForEdit: String?
     @ObservationIgnored private let transferClient: RemoteClient
+    /// Quick Look のプレビュー用（一覧表示や転送を待たせないよう接続を分ける）
+    @ObservationIgnored private let previewClient: RemoteClient
     @ObservationIgnored private var hasPassword: Bool
 
     init(server: ServerConfig, password: String?, excludeRules: @escaping () -> ExcludeRules) {
@@ -36,6 +38,7 @@ final class ServerSession {
         let browseClient = RemoteClient(server: server, password: password)
         remote = BrowserModel(side: .remote, client: browseClient)
         transferClient = RemoteClient(server: server, password: password)
+        previewClient = RemoteClient(server: server, password: password)
         transfers = TransferQueue(client: transferClient, lister: browseClient, excludeRules: excludeRules)
         transfers.serverName = server.name
         // 秘密鍵はパスフレーズ無しの場合もあるので、パスワード無しでも接続を試す
@@ -58,6 +61,7 @@ final class ServerSession {
         if !hasPassword, let password = Passwords.password(for: server.id) {
             client.setPassword(password)
             transferClient.setPassword(password)
+            previewClient.setPassword(password)
             hasPassword = true
         }
         guard hasPassword else {
@@ -100,6 +104,7 @@ final class ServerSession {
     func connect(withPassword password: String, save: Bool) async {
         remote.client?.setPassword(password)
         transferClient.setPassword(password)
+        previewClient.setPassword(password)
         if save {
             Passwords.setPassword(password, for: server.id)
         }
@@ -162,29 +167,61 @@ final class ServerSession {
     /// これより大きいファイルはダウンロードに時間がかかるのでプレビューしない
     private static let previewSizeLimit: Int64 = 50 * 1024 * 1024
 
-    /// Quick Look 用にダウンロードしたファイル。転送一覧には出さず、一覧表示用の接続で取得する。
-    /// 前回と同じサイズのファイルがあればダウンロードし直さない。
+    /// 選んだだけで先にダウンロードしておくファイルの大きさの上限
+    private static let prefetchSizeLimit: Int64 = 5 * 1024 * 1024
+
+    /// ダウンロード中のプレビュー（同じファイルを二重にダウンロードしないため）
+    @ObservationIgnored private var previewDownloads: [String: Task<URL?, Never>] = [:]
+
+    private func previewCacheURL(for entry: FileEntry) -> URL {
+        Self.previewCacheDirectory
+            .appendingPathComponent(server.id.uuidString)
+            .appendingPathComponent(String(entry.path.dropFirst()))
+    }
+
+    /// ダウンロード済みで、すぐに表示できるプレビュー（同じサイズのファイルがあれば使い回す）
+    func cachedPreviewURL(for entry: FileEntry) -> URL? {
+        guard !entry.isDirectory else { return nil }
+        let url = previewCacheURL(for: entry)
+        let cachedSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        return cachedSize != nil && cachedSize == entry.size ? url : nil
+    }
+
+    /// Quick Look 用にダウンロードしたファイル。転送一覧には出さず、プレビュー専用の接続で取得する。
     func previewURL(for entry: FileEntry) async -> URL? {
-        guard !entry.isDirectory, let client = remote.client else { return nil }
+        guard !entry.isDirectory else { return nil }
         if let size = entry.size, size > Self.previewSizeLimit {
             remote.errorMessage = "\(entry.name) は大きいため（\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))）プレビューしません"
             return nil
         }
-        let url = Self.previewCacheDirectory
-            .appendingPathComponent(server.id.uuidString)
-            .appendingPathComponent(String(entry.path.dropFirst()))
-        let cachedSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
-        if let cachedSize, cachedSize == entry.size {
-            return url
+        if let cached = cachedPreviewURL(for: entry) {
+            return cached
         }
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try await client.download(entry.path, to: url, expectedSize: entry.size)
-            return url
-        } catch {
-            remote.errorMessage = "プレビュー用のダウンロードに失敗しました: \(error.localizedDescription)"
-            return nil
+        if let running = previewDownloads[entry.path] {
+            return await running.value
         }
+        let url = previewCacheURL(for: entry)
+        let client = previewClient
+        let task = Task<URL?, Never> { @MainActor in
+            defer { previewDownloads[entry.path] = nil }
+            do {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try await client.download(entry.path, to: url, expectedSize: entry.size)
+                return url
+            } catch {
+                remote.errorMessage = "プレビュー用のダウンロードに失敗しました: \(error.localizedDescription)"
+                return nil
+            }
+        }
+        previewDownloads[entry.path] = task
+        return await task.value
+    }
+
+    /// サーバー側で小さいファイルを 1 つ選んだら、スペースを押す前に裏でダウンロードしておく
+    func prefetchPreview(for entry: FileEntry) {
+        guard status == .connected, !entry.isDirectory, let size = entry.size, size <= Self.prefetchSizeLimit,
+              cachedPreviewURL(for: entry) == nil, previewDownloads[entry.path] == nil else { return }
+        Task { _ = await previewURL(for: entry) }
     }
 
     private static let previewCacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

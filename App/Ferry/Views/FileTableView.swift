@@ -20,8 +20,12 @@ struct FileTableView: NSViewRepresentable {
     let onDelete: ([FileEntry]) -> Void
     let menuItems: ([FileEntry]) -> [MenuAction]
     let dragWriter: (FileEntry) -> NSPasteboardWriting?
+    /// Quick Look ですぐに表示できるファイル（ローカルのファイル、ダウンロード済みのリモートのファイル）
+    let cachedPreviewURL: (FileEntry) -> URL?
     /// Quick Look で表示するファイル（リモートはダウンロードしてから返す）。nil なら表示しない。
     let previewURL: (FileEntry) async -> URL?
+    /// ファイルを 1 つ選んだとき（リモートのプレビューの先読み用）
+    var onSelectSingleFile: ((FileEntry) -> Void)?
     /// ドロップを受け付ける型と、受け取った時の処理（true なら受け付けた）
     let dropTypes: [NSPasteboard.PasteboardType]
     let onDrop: (NSPasteboard) -> Bool
@@ -69,6 +73,8 @@ struct FileTableView: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         context.coordinator.table = table
+        // Quick Look のパネルは初回の準備に時間がかかるので、先に作っておく
+        DispatchQueue.main.async { _ = QLPreviewPanel.shared() }
         return scroll
     }
 
@@ -99,6 +105,7 @@ struct FileTableView: NSViewRepresentable {
         weak var table: NSTableView?
         let preview = PreviewSource()
         private var previewTask: Task<Void, Never>?
+        private var prefetchTask: Task<Void, Never>?
         private var entries: [FileEntry] = []
         private var isApplyingSelection = false
 
@@ -171,6 +178,15 @@ struct FileTableView: NSViewRepresentable {
             if preview.isControlling, QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
                 loadPreview(thenShow: false)
             }
+            // 矢印キーで次々と選んでいる間は先読みしないよう、少し止まってから頼む
+            prefetchTask?.cancel()
+            let selected = entries(at: table.selectedRowIndexes)
+            if let onSelectSingleFile = parent.onSelectSingleFile, selected.count == 1, !selected[0].isDirectory {
+                prefetchTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(250))
+                    if !Task.isCancelled { onSelectSingleFile(selected[0]) }
+                }
+            }
         }
 
         // MARK: Quick Look
@@ -189,6 +205,14 @@ struct FileTableView: NSViewRepresentable {
             let targets = Array(selectedEntries.filter { !$0.isDirectory }.prefix(10))
             previewTask?.cancel()
             guard !targets.isEmpty else { return }
+
+            // すべてすぐに表示できるなら、待たずにその場で開く
+            let ready = targets.compactMap(parent.cachedPreviewURL)
+            if ready.count == targets.count {
+                show(ready, thenShow: thenShow)
+                return
+            }
+
             let resolve = parent.previewURL
             previewTask = Task { @MainActor in
                 var urls: [URL] = []
@@ -197,13 +221,17 @@ struct FileTableView: NSViewRepresentable {
                     if Task.isCancelled { return }
                 }
                 guard !urls.isEmpty else { return }
-                preview.urls = urls
-                let panel = QLPreviewPanel.shared()!
-                if thenShow {
-                    panel.makeKeyAndOrderFront(nil)
-                }
-                panel.reloadData()
+                show(urls, thenShow: thenShow)
             }
+        }
+
+        private func show(_ urls: [URL], thenShow: Bool) {
+            preview.urls = urls
+            let panel = QLPreviewPanel.shared()!
+            if thenShow {
+                panel.makeKeyAndOrderFront(nil)
+            }
+            panel.reloadData()
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {

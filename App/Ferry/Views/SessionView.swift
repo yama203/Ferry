@@ -246,7 +246,9 @@ struct SessionView: View {
                 dragWriter: { session.dragWriter(forRemote: $0) },
                 onEdit: { entry in Task { await session.edit(entry) } },
                 onSync: { isSyncing = true },
-                remotePreview: { await session.previewURL(for: $0) }
+                remotePreview: { await session.previewURL(for: $0) },
+                remoteCachedPreview: { session.cachedPreviewURL(for: $0) },
+                prefetchPreview: { session.prefetchPreview(for: $0) }
             )
         }
     }

@@ -20,6 +20,10 @@ struct FileBrowserView: View {
     var onSync: (() -> Void)?
     /// リモート側のみ: Quick Look 用にダウンロードしたファイル
     var remotePreview: ((FileEntry) async -> URL?)?
+    /// リモート側のみ: ダウンロード済みのプレビュー
+    var remoteCachedPreview: ((FileEntry) -> URL?)?
+    /// リモート側のみ: プレビューの先読み
+    var prefetchPreview: ((FileEntry) -> Void)?
 
     @State private var isDropTargeted = false
     @State private var renameTarget: FileEntry?
@@ -198,10 +202,15 @@ struct FileBrowserView: View {
             onDelete: requestDelete,
             menuItems: menuItems(for:),
             dragWriter: dragWriter,
+            cachedPreviewURL: { entry in
+                if let remoteCachedPreview { return remoteCachedPreview(entry) }
+                return URL(fileURLWithPath: entry.path)
+            },
             previewURL: { entry in
                 if let remotePreview { return await remotePreview(entry) }
                 return URL(fileURLWithPath: entry.path)
             },
+            onSelectSingleFile: prefetchPreview,
             dropTypes: dropTypes,
             onDrop: onDrop,
             isDropTargeted: $isDropTargeted
