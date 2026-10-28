@@ -18,6 +18,8 @@ struct FileBrowserView: View {
     var onEdit: ((FileEntry) -> Void)?
     /// 右のペインとの同期
     var onSync: (() -> Void)?
+    /// リモート側のみ: Quick Look 用にダウンロードしたファイル
+    var remotePreview: ((FileEntry) async -> URL?)?
 
     @State private var isDropTargeted = false
     @State private var renameTarget: FileEntry?
@@ -196,6 +198,10 @@ struct FileBrowserView: View {
             onDelete: requestDelete,
             menuItems: menuItems(for:),
             dragWriter: dragWriter,
+            previewURL: { entry in
+                if let remotePreview { return await remotePreview(entry) }
+                return URL(fileURLWithPath: entry.path)
+            },
             dropTypes: dropTypes,
             onDrop: onDrop,
             isDropTargeted: $isDropTargeted

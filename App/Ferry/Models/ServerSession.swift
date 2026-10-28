@@ -157,6 +157,39 @@ final class ServerSession {
         }
     }
 
+    // MARK: - Quick Look
+
+    /// これより大きいファイルはダウンロードに時間がかかるのでプレビューしない
+    private static let previewSizeLimit: Int64 = 50 * 1024 * 1024
+
+    /// Quick Look 用にダウンロードしたファイル。転送一覧には出さず、一覧表示用の接続で取得する。
+    /// 前回と同じサイズのファイルがあればダウンロードし直さない。
+    func previewURL(for entry: FileEntry) async -> URL? {
+        guard !entry.isDirectory, let client = remote.client else { return nil }
+        if let size = entry.size, size > Self.previewSizeLimit {
+            remote.errorMessage = "\(entry.name) は大きいため（\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))）プレビューしません"
+            return nil
+        }
+        let url = Self.previewCacheDirectory
+            .appendingPathComponent(server.id.uuidString)
+            .appendingPathComponent(String(entry.path.dropFirst()))
+        let cachedSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        if let cachedSize, cachedSize == entry.size {
+            return url
+        }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try await client.download(entry.path, to: url, expectedSize: entry.size)
+            return url
+        } catch {
+            remote.errorMessage = "プレビュー用のダウンロードに失敗しました: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    private static let previewCacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("com.yama.Ferry/Preview")
+
     private static let editCacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("com.yama.Ferry/Edit")
 

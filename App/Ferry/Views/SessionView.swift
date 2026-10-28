@@ -242,7 +242,8 @@ struct SessionView: View {
                 onDrop: handleLocalFilesDropped,
                 dragWriter: { session.dragWriter(forRemote: $0) },
                 onEdit: { entry in Task { await session.edit(entry) } },
-                onSync: { isSyncing = true }
+                onSync: { isSyncing = true },
+                remotePreview: { await session.previewURL(for: $0) }
             )
         }
     }

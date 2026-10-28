@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -19,6 +20,8 @@ struct FileTableView: NSViewRepresentable {
     let onDelete: ([FileEntry]) -> Void
     let menuItems: ([FileEntry]) -> [MenuAction]
     let dragWriter: (FileEntry) -> NSPasteboardWriting?
+    /// Quick Look で表示するファイル（リモートはダウンロードしてから返す）。nil なら表示しない。
+    let previewURL: (FileEntry) async -> URL?
     /// ドロップを受け付ける型と、受け取った時の処理（true なら受け付けた）
     let dropTypes: [NSPasteboard.PasteboardType]
     let onDrop: (NSPasteboard) -> Bool
@@ -94,6 +97,8 @@ struct FileTableView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         var parent: FileTableView
         weak var table: NSTableView?
+        let preview = PreviewSource()
+        private var previewTask: Task<Void, Never>?
         private var entries: [FileEntry] = []
         private var isApplyingSelection = false
 
@@ -162,6 +167,43 @@ struct FileTableView: NSViewRepresentable {
             let ids = Set(entries(at: table.selectedRowIndexes).map(\.id))
             // 描画中の状態変更を避ける
             DispatchQueue.main.async { self.parent.selection = ids }
+            // プレビューを開いたまま選択を変えたら、表示も切り替える
+            if preview.isControlling, QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+                loadPreview(thenShow: false)
+            }
+        }
+
+        // MARK: Quick Look
+
+        /// スペースバー: 表示中なら閉じ、そうでなければ選択中のファイルを表示する
+        func togglePreview() {
+            if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+                QLPreviewPanel.shared().orderOut(nil)
+            } else {
+                loadPreview(thenShow: true)
+            }
+        }
+
+        private func loadPreview(thenShow: Bool) {
+            // フォルダは除き、リモートのダウンロードに時間がかかりすぎないよう 10 件まで
+            let targets = Array(selectedEntries.filter { !$0.isDirectory }.prefix(10))
+            previewTask?.cancel()
+            guard !targets.isEmpty else { return }
+            let resolve = parent.previewURL
+            previewTask = Task { @MainActor in
+                var urls: [URL] = []
+                for entry in targets {
+                    if let url = await resolve(entry) { urls.append(url) }
+                    if Task.isCancelled { return }
+                }
+                guard !urls.isEmpty else { return }
+                preview.urls = urls
+                let panel = QLPreviewPanel.shared()!
+                if thenShow {
+                    panel.makeKeyAndOrderFront(nil)
+                }
+                panel.reloadData()
+            }
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
@@ -249,12 +291,14 @@ extension NSUserInterfaceItemIdentifier {
     static let permissions = NSUserInterfaceItemIdentifier("permissions")
 }
 
-/// キー操作（削除・Return）を受け取る表
+/// キー操作（削除・Return・スペース）を受け取る表
 final class FerryTableView: NSTableView {
     weak var coordinator: FileTableView.Coordinator?
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
+        case 49: // space
+            coordinator?.togglePreview()
         case 51, 117: // delete, forward delete
             coordinator?.deleteSelected()
         case 36, 76: // return, enter
@@ -262,6 +306,25 @@ final class FerryTableView: NSTableView {
         default:
             super.keyDown(with: event)
         }
+    }
+
+    // Quick Look のパネルは、最初に名乗り出た responder にデータを問い合わせる
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        true
+    }
+
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        guard let preview = coordinator?.preview else { return }
+        preview.table = self
+        preview.isControlling = true
+        panel.dataSource = preview
+        panel.delegate = preview
+    }
+
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        coordinator?.preview.isControlling = false
+        panel.dataSource = nil
+        panel.delegate = nil
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -272,6 +335,37 @@ final class FerryTableView: NSTableView {
     override func draggingEnded(_ sender: NSDraggingInfo) {
         super.draggingEnded(sender)
         coordinator?.setDropTargeted(false)
+    }
+}
+
+/// Quick Look のパネルに表示するファイルを渡す
+final class PreviewSource: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
+    var urls: [URL] = []
+    var isControlling = false
+    weak var table: NSTableView?
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        urls.count
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        urls[index] as NSURL
+    }
+
+    /// パネルが前面にある間も、上下の矢印キーで表の選択を動かせるようにする
+    func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown, [125, 126].contains(event.keyCode), let table else { return false }
+        table.keyDown(with: event)
+        return true
+    }
+
+    /// 表示中の行からズームして開く
+    func previewPanel(_ panel: QLPreviewPanel!, sourceFrameOnScreenFor item: QLPreviewItem!) -> NSRect {
+        guard let table, let window = table.window else { return .zero }
+        let row = table.selectedRow
+        guard row >= 0 else { return .zero }
+        let rect = table.convert(table.rect(ofRow: row), to: nil)
+        return window.convertToScreen(rect)
     }
 }
 
