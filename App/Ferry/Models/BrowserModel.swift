@@ -14,13 +14,24 @@ final class BrowserModel {
     let client: RemoteClient?
 
     private(set) var path = ""
-    private(set) var entries: [FileEntry] = []
+    private(set) var entries: [FileEntry] = [] {
+        didSet { updateVisibleEntries() }
+    }
     private(set) var isLoading = false
     var errorMessage: String?
     var selection = Set<FileEntry.ID>()
-    var sortKey = SortKey.name
-    var ascending = true
-    var showHidden: Bool
+    var sortKey = SortKey.name {
+        didSet { if sortKey != oldValue { updateVisibleEntries() } }
+    }
+    var ascending = true {
+        didSet { if ascending != oldValue { updateVisibleEntries() } }
+    }
+    var showHidden: Bool {
+        didSet { if showHidden != oldValue { updateVisibleEntries() } }
+    }
+    /// 表示する一覧（フォルダが先、その中で選択中の並び順）。
+    /// 選択を変えるたびに並べ替えると重いので、中身や並び順が変わったときだけ作り直す。
+    private(set) var visibleEntries: [FileEntry] = []
 
     private var history: [String] = []
 
@@ -34,12 +45,11 @@ final class BrowserModel {
     var canGoBack: Bool { !history.isEmpty }
     var canGoUp: Bool { path != "/" && !path.isEmpty }
 
-    /// フォルダが先、その中で選択中の並び順
-    var visibleEntries: [FileEntry] {
+    private func updateVisibleEntries() {
         let shown = showHidden ? entries : entries.filter { !$0.isHidden }
         let folders = shown.filter(\.isDirectory).sorted(by: isOrderedBefore)
         let files = shown.filter { !$0.isDirectory }.sorted(by: isOrderedBefore)
-        return folders + files
+        visibleEntries = folders + files
     }
 
     private func isOrderedBefore(_ a: FileEntry, _ b: FileEntry) -> Bool {

@@ -16,19 +16,22 @@ struct SessionView: View {
     var body: some View {
         VSplitView {
             PaneSplitView(autosaveName: "Ferry.Panes", minimumWidth: 260) {
-                FileBrowserView(
-                    model: session.local,
-                    title: "この Mac",
-                    systemImage: "laptopcomputer",
-                    transferLabel: "アップロード",
-                    onTransfer: { entries in Task { await session.upload(entries) } },
-                    dropTypes: [.ferryRemoteItem, .fileURL],
-                    onDrop: handleLocalPaneDrop,
-                    dragWriter: { NSURL(fileURLWithPath: $0.path) },
-                    onSync: session.status == .connected ? { isSyncing = true } : nil
-                )
+                // ペインは一度だけ作られるので、接続状態などの変化は Live の中で読んで追う
+                Live {
+                    FileBrowserView(
+                        model: session.local,
+                        title: "この Mac",
+                        systemImage: "laptopcomputer",
+                        transferLabel: "アップロード",
+                        onTransfer: { entries in Task { await session.upload(entries) } },
+                        dropTypes: [.ferryRemoteItem, .fileURL],
+                        onDrop: handleLocalPaneDrop,
+                        dragWriter: { NSURL(fileURLWithPath: $0.path) },
+                        onSync: session.status == .connected ? { isSyncing = true } : nil
+                    )
+                }
             } right: {
-                remotePane
+                Live { remotePane }
             }
             .frame(minHeight: 280, maxHeight: .infinity)
 
@@ -316,5 +319,15 @@ private struct EditingMenu: View {
             Label("編集中 \(watcher.files.count)", systemImage: "pencil.circle")
         }
         .help("エディタで編集中のファイル")
+    }
+}
+
+/// 中身をこのビューの描画の中で作る。モデルの変更（接続状態など）をこのビュー自身が追うので、
+/// 一度だけ作られる PaneSplitView の中でも表示が更新される。
+private struct Live<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
     }
 }

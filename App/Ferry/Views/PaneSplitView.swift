@@ -29,10 +29,10 @@ struct PaneSplitView<Left: View, Right: View>: NSViewRepresentable {
         return split
     }
 
-    func updateNSView(_ split: EqualSplitView, context: Context) {
-        context.coordinator.hosts?.left.rootView = AnyView(left())
-        context.coordinator.hosts?.right.rootView = AnyView(right())
-    }
+    /// 中身は最初に作ったものを使い続ける。ペインの中身はそれぞれ自分でモデルの変更を追うので、
+    /// ここで作り直すと選択を変えるたびに両方のペインを丸ごと描き直すことになり重い。
+    /// （接続先が変わったときは SessionView ごと作り直される）
+    func updateNSView(_ split: EqualSplitView, context: Context) {}
 
     final class Coordinator: NSObject, NSSplitViewDelegate {
         let minimumWidth: CGFloat
