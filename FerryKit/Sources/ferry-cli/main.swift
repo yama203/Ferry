@@ -5,6 +5,7 @@ import FerryKit
 //   ferry-cli ls   sftp://user@host[:port] [/path]
 //   ferry-cli get  ftps://user@host:10021 /remote/file ./local
 //   ferry-cli get -r <url> /remote/folder ./local   … フォルダごと（同じサイズ・日時のファイルは飛ばす）
+//                                                    --parallel <数> で同時に使う接続の数（既定は 4）
 //   ferry-cli put  ftp://user@host ./local /remote/file
 //   ferry-cli mkdir|rm|rmdir <url> /path
 //   ferry-cli mv   <url> /from /to
@@ -18,7 +19,7 @@ let usage = """
 使い方: ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> <ftp|ftps|sftp>://user@host[:port] [引数...]
 　　　 ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> --server <接続先の名前> [引数...]
 　　　 ferry-cli servers
-オプション: --implicit --insecure --active --key <秘密鍵> --verbose -r（get でフォルダごと）
+オプション: --implicit --insecure --active --key <秘密鍵> --verbose -r（get でフォルダごと） --parallel <接続数>
 """
 
 func fail(_ message: String) -> Never {
@@ -40,6 +41,7 @@ var args = Array(CommandLine.arguments.dropFirst())
 var implicit = false, insecure = false, active = false, verbose = false, recursive = false
 var keyPath: String?
 var savedServerName: String?
+var parallel = 4
 
 var positional: [String] = []
 var iterator = args.makeIterator()
@@ -53,6 +55,9 @@ while let arg = iterator.next() {
     case "--key":
         guard let value = iterator.next() else { fail("--key には秘密鍵のパスを指定してください") }
         keyPath = value
+    case "--parallel":
+        guard let value = iterator.next().flatMap(Int.init), value >= 1 else { fail("--parallel には 1 以上の数を指定してください") }
+        parallel = value
     case "--server":
         guard let value = iterator.next() else { fail("--server には接続先の名前を指定してください") }
         savedServerName = value
@@ -158,7 +163,8 @@ do {
         let local = URL(fileURLWithPath: rest.count > 1 ? rest[1] : RemotePath.name(of: remote))
         if recursive {
             var result = FolderDownload()
-            try await result.run(client, remote, to: local)
+            try await result.run(server: server, password: password, verbose: verbose, remote, to: local,
+                                 connections: parallel)
             print("✅ ダウンロード完了: \(local.path)（\(result.downloaded) 件ダウンロード、\(result.skipped) 件は変更なし）")
             if !result.failures.isEmpty {
                 fail("❌ \(result.failures.count) 件ダウンロードできませんでした:\n" + result.failures.joined(separator: "\n"))
