@@ -12,6 +12,9 @@ public final class RemoteClient: @unchecked Sendable {
     private var handle: CurlHandle?
     /// MLSD 非対応のサーバーでは LIST に切り替える
     private var supportsMLSD = true
+    /// LIST だけでは .htaccess などの隠しファイルを返さないサーバー（vsFTPd など）があるので、
+    /// MLSD 非対応のときは LIST -a を使う。受け付けないサーバーでは LIST に戻す
+    private var supportsListAll = true
 
     /// 通信ログを stderr に出す（PASS は伏せ字）
     public var debugLog = false
@@ -56,6 +59,20 @@ public final class RemoteClient: @unchecked Sendable {
                                                    directory: directory)
                 } catch let error as FerryError where error.kind == .other {
                     self.supportsMLSD = false
+                    handle.reset()
+                    self.configure(handle)
+                }
+            }
+            if self.server.serverProtocol.isFTPFamily, self.supportsListAll {
+                do {
+                    let items = ListingParser.parseUnixListing(
+                        try self.fetchListing(handle, directory, command: "LIST -a"), directory: directory)
+                    // -a をパスとして解釈して空を返すサーバーもあるので、空のときは LIST で取り直す
+                    if !items.isEmpty { return items }
+                    handle.reset()
+                    self.configure(handle)
+                } catch let error as FerryError where error.kind == .other {
+                    self.supportsListAll = false
                     handle.reset()
                     self.configure(handle)
                 }

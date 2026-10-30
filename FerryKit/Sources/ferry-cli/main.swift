@@ -4,6 +4,7 @@ import FerryKit
 // 接続部分の動作確認用ツール。
 //   ferry-cli ls   sftp://user@host[:port] [/path]
 //   ferry-cli get  ftps://user@host:10021 /remote/file ./local
+//   ferry-cli get -r <url> /remote/folder ./local   … フォルダごと（同じサイズ・日時のファイルは飛ばす）
 //   ferry-cli put  ftp://user@host ./local /remote/file
 //   ferry-cli mkdir|rm|rmdir <url> /path
 //   ferry-cli mv   <url> /from /to
@@ -17,7 +18,7 @@ let usage = """
 使い方: ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> <ftp|ftps|sftp>://user@host[:port] [引数...]
 　　　 ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> --server <接続先の名前> [引数...]
 　　　 ferry-cli servers
-オプション: --implicit --insecure --active --key <秘密鍵> --verbose
+オプション: --implicit --insecure --active --key <秘密鍵> --verbose -r（get でフォルダごと）
 """
 
 func fail(_ message: String) -> Never {
@@ -36,7 +37,7 @@ func formatSize(_ size: Int64?) -> String {
 }
 
 var args = Array(CommandLine.arguments.dropFirst())
-var implicit = false, insecure = false, active = false, verbose = false
+var implicit = false, insecure = false, active = false, verbose = false, recursive = false
 var keyPath: String?
 var savedServerName: String?
 
@@ -48,6 +49,7 @@ while let arg = iterator.next() {
     case "--insecure": insecure = true
     case "--active": active = true
     case "--verbose": verbose = true
+    case "-r", "--recursive": recursive = true
     case "--key":
         guard let value = iterator.next() else { fail("--key には秘密鍵のパスを指定してください") }
         keyPath = value
@@ -154,8 +156,17 @@ do {
     case "get":
         let remote = argument(0, "リモートのパス")
         let local = URL(fileURLWithPath: rest.count > 1 ? rest[1] : RemotePath.name(of: remote))
-        try await client.download(remote, to: local, progress: printProgress)
-        print("\n✅ ダウンロード完了: \(local.path)")
+        if recursive {
+            var result = FolderDownload()
+            try await result.run(client, remote, to: local)
+            print("✅ ダウンロード完了: \(local.path)（\(result.downloaded) 件ダウンロード、\(result.skipped) 件は変更なし）")
+            if !result.failures.isEmpty {
+                fail("❌ \(result.failures.count) 件ダウンロードできませんでした:\n" + result.failures.joined(separator: "\n"))
+            }
+        } else {
+            try await client.download(remote, to: local, progress: printProgress)
+            print("\n✅ ダウンロード完了: \(local.path)")
+        }
 
     case "put":
         let local = URL(fileURLWithPath: argument(0, "ローカルのファイル"))
