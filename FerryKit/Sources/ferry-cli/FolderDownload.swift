@@ -23,18 +23,14 @@ struct FolderDownload {
     /// connections … 同時に使う接続の数。共用サーバーは同時接続数に上限があることが多いので控えめにする
     mutating func run(server: ServerConfig, password: String?, verbose: Bool, _ remote: String, to local: URL,
                       connections: Int) async throws {
-        let lister = RemoteClient(server: server, password: password)
-        lister.debugLog = verbose
-        var jobs: [Job] = []
-        try await collect(lister, remote, to: local, into: &jobs)
-        print("📋 \(jobs.count) 件をダウンロードします（\(skipped) 件は変更なし、接続 \(connections) 本）")
-
-        let clients = (0..<max(1, connections)).map { index -> RemoteClient in
-            // 一覧に使った接続も 1 本目として使い回す
-            let client = index == 0 ? lister : RemoteClient(server: server, password: password)
+        let clients = (0..<max(1, connections)).map { _ -> RemoteClient in
+            let client = RemoteClient(server: server, password: password)
             client.debugLog = verbose
             return client
         }
+        let jobs = try await collect(clients, remote, to: local)
+        print("📋 \(jobs.count) 件をダウンロードします（\(skipped) 件は変更なし、接続 \(connections) 本）")
+
         let queue = JobQueue(jobs)
         await withTaskGroup(of: [Outcome].self) { group in
             for client in clients {
@@ -67,33 +63,66 @@ struct FolderDownload {
         }
     }
 
-    /// フォルダをたどり、ダウンロードが必要なファイルを集める（ローカルのフォルダもここで作る）
-    private mutating func collect(_ client: RemoteClient, _ remote: String, to local: URL,
-                                  into jobs: inout [Job]) async throws {
-        try FileManager.default.createDirectory(at: local, withIntermediateDirectories: true)
-        let items: [RemoteItem]
-        do {
-            items = try await client.list(remote)
-        } catch {
-            failures.append("\(remote)/: \(error.localizedDescription)")
-            return
-        }
-        for item in items.sorted(by: { $0.name < $1.name }) {
-            let target = local.appendingPathComponent(item.name)
-            switch item.kind {
-            case .directory:
-                try await collect(client, item.path, to: target, into: &jobs)
-            case .symlink:
-                // リンク先がフォルダかどうか一覧からは分からないので、リンクは取らずに知らせる
-                print("🔗 飛ばしました（リンク）: \(item.path) -> \(item.symlinkTarget ?? "?")")
-            case .file:
-                if isUnchanged(target, item) {
-                    skipped += 1
-                } else {
-                    jobs.append(Job(item: item, target: target))
+    /// フォルダをたどり、ダウンロードが必要なファイルを集める（ローカルのフォルダもここで作る）。
+    /// フォルダが多いと一覧の取得に時間がかかるので、同じ階層のフォルダは複数の接続で同時に一覧を取る。
+    private mutating func collect(_ clients: [RemoteClient], _ remote: String, to local: URL) async throws -> [Job] {
+        var jobs: [Job] = []
+        var level: [Job] = [Job(item: RemoteItem(name: RemotePath.name(of: remote), path: remote, kind: .directory),
+                                target: local)]
+        while !level.isEmpty {
+            for folder in level {
+                try FileManager.default.createDirectory(at: folder.target, withIntermediateDirectories: true)
+            }
+            let queue = JobQueue(level)
+            var listings: [(folder: Job, result: Result<[RemoteItem], Error>)] = []
+            await withTaskGroup(of: [(folder: Job, result: Result<[RemoteItem], Error>)].self) { group in
+                for client in clients {
+                    group.addTask {
+                        var results: [(folder: Job, result: Result<[RemoteItem], Error>)] = []
+                        while let folder = await queue.next() {
+                            do {
+                                results.append((folder, .success(try await client.list(folder.item.path))))
+                            } catch {
+                                results.append((folder, .failure(error)))
+                            }
+                        }
+                        return results
+                    }
+                }
+                for await results in group {
+                    listings += results
                 }
             }
+
+            var next: [Job] = []
+            for (folder, result) in listings.sorted(by: { $0.folder.item.path < $1.folder.item.path }) {
+                let items: [RemoteItem]
+                switch result {
+                case .success(let listed): items = listed
+                case .failure(let error):
+                    failures.append("\(folder.item.path)/: \(error.localizedDescription)")
+                    continue
+                }
+                for item in items.sorted(by: { $0.name < $1.name }) {
+                    let target = folder.target.appendingPathComponent(item.name)
+                    switch item.kind {
+                    case .directory:
+                        next.append(Job(item: item, target: target))
+                    case .symlink:
+                        // リンク先がフォルダかどうか一覧からは分からないので、リンクは取らずに知らせる
+                        print("🔗 飛ばしました（リンク）: \(item.path) -> \(item.symlinkTarget ?? "?")")
+                    case .file:
+                        if isUnchanged(target, item) {
+                            skipped += 1
+                        } else {
+                            jobs.append(Job(item: item, target: target))
+                        }
+                    }
+                }
+            }
+            level = next
         }
+        return jobs
     }
 
     private func isUnchanged(_ local: URL, _ item: RemoteItem) -> Bool {

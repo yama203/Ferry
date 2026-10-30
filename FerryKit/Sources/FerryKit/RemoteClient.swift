@@ -208,6 +208,8 @@ public final class RemoteClient: @unchecked Sendable {
             if proto == .ftps {
                 handle.set(CURLOPT_USE_SSL, Int(CURLUSESSL_ALL))
             }
+            // 既定では階層ごとに CWD を送るので、深いフォルダほど遅くなる。フルパスで 1 回だけ CWD する
+            handle.set(CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_SINGLECWD)
             if server.passiveMode {
                 // EPSV を試し、非対応なら PASV に自動で切り替わる
                 handle.set(CURLOPT_FTP_USE_EPSV, true)
