@@ -4,7 +4,8 @@ import SwiftUI
 
 struct ServerEditView: View {
     let isNew: Bool
-    let onSave: (ServerConfig, String) -> Void
+    /// 保存したとき（接続先、パスワード、会社で共有するか）
+    let onSave: (ServerConfig, String, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ServerStore.self) private var store
@@ -12,6 +13,7 @@ struct ServerEditView: View {
     @State private var password: String
     @State private var portText: String
     @State private var test: TestState = .idle
+    @State private var shared: Bool
 
     private enum TestState: Equatable {
         case idle, running
@@ -19,9 +21,10 @@ struct ServerEditView: View {
         case failure(String)
     }
 
-    init(server: ServerConfig, isNew: Bool, onSave: @escaping (ServerConfig, String) -> Void) {
+    init(server: ServerConfig, isNew: Bool, shared: Bool, onSave: @escaping (ServerConfig, String, Bool) -> Void) {
         self.isNew = isNew
         self.onSave = onSave
+        _shared = State(initialValue: shared)
         _draft = State(initialValue: server)
         _password = State(initialValue: isNew ? "" : Passwords.password(for: server.id) ?? "")
         _portText = State(initialValue: server.port.map(String.init) ?? "")
@@ -32,10 +35,21 @@ struct ServerEditView: View {
             Form {
                 Section {
                     TextField("名前", text: $draft.name, prompt: Text(draft.host.isEmpty ? "例: 本番サーバー" : draft.host))
-                    if !store.folders.isEmpty {
+                    if store.shared.isEnabled {
+                        Toggle(isOn: $shared) {
+                            Text("会社で共有する")
+                            Text("Dropbox の共有フォルダに保存し、会社の全員の一覧に表示します。パスワードは共有しません")
+                        }
+                        .onChange(of: shared) {
+                            // 共有と自分ではフォルダが別なので選び直してもらう
+                            draft.folderID = nil
+                        }
+                    }
+                    let folders = shared ? store.shared.folders : store.personalFolders
+                    if !folders.isEmpty {
                         Picker("フォルダ", selection: $draft.folderID) {
                             Text("なし").tag(UUID?.none)
-                            ForEach(store.folders) { folder in
+                            ForEach(folders) { folder in
                                 Text(folder.name).tag(Optional(folder.id))
                             }
                         }
@@ -156,7 +170,7 @@ struct ServerEditView: View {
     }
 
     private func save() {
-        onSave(normalized(), password)
+        onSave(normalized(), password, shared)
         dismiss()
     }
 

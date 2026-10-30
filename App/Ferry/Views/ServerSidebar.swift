@@ -17,11 +17,11 @@ struct ServerSidebar: View {
     @State private var searchText = ""
 
     private enum FolderNameTarget: Identifiable {
-        case new
+        case new(shared: Bool)
         case rename(ServerFolder)
         var id: String {
             switch self {
-            case .new: "new"
+            case .new(let shared): "new-\(shared)"
             case .rename(let folder): folder.id.uuidString
             }
         }
@@ -66,7 +66,11 @@ struct ServerSidebar: View {
             ToolbarItem {
                 Menu {
                     Button("接続先を追加…") { editor = .init(server: .newDraft, isNew: true) }
-                    Button("フォルダを追加…") { startFolderName(.new) }
+                    Button("フォルダを追加…") { startFolderName(.new(shared: false)) }
+                    if store.shared.isEnabled {
+                        Divider()
+                        Button("共有フォルダを追加…") { startFolderName(.new(shared: true)) }
+                    }
                     Divider()
                     Button("Transmit から読み込む…") { store.chooseTransmitFile() }
                 } label: {
@@ -76,20 +80,38 @@ struct ServerSidebar: View {
         }
     }
 
+    /// 会社の共有（Dropbox）を先に、その下に自分の接続先
     @ViewBuilder private var folderSections: some View {
-        ForEach(store.folders) { folder in
-            Section(isExpanded: expansion(of: folder)) {
-                rows(for: store.servers(inFolder: folder.id))
+        if store.shared.isEnabled {
+            ForEach(store.shared.folders) { folder in
+                Section(isExpanded: expansion(of: folder)) {
+                    rows(for: store.servers(inFolder: folder.id, shared: true))
+                } header: {
+                    folderHeader(folder, shared: true)
+                }
+            }
+            Section {
+                rows(for: store.servers(inFolder: nil, shared: true))
             } header: {
-                folderHeader(folder)
+                Label(store.shared.folders.isEmpty ? "会社の共有" : "会社の共有・フォルダなし", systemImage: "person.2")
+                    .dropDestination(for: String.self) { ids, _ in
+                        moveServers(ids, to: nil, shared: true)
+                    }
+            }
+        }
+        ForEach(store.personalFolders) { folder in
+            Section(isExpanded: expansion(of: folder)) {
+                rows(for: store.servers(inFolder: folder.id, shared: false))
+            } header: {
+                folderHeader(folder, shared: false)
             }
         }
         Section {
-            rows(for: store.servers(inFolder: nil))
+            rows(for: store.servers(inFolder: nil, shared: false))
         } header: {
-            Text(store.folders.isEmpty ? "接続先" : "フォルダなし")
+            Text(store.personalFolders.isEmpty ? (store.shared.isEnabled ? "自分の接続先" : "接続先") : "フォルダなし")
                 .dropDestination(for: String.self) { ids, _ in
-                    moveServers(ids, to: nil)
+                    moveServers(ids, to: nil, shared: false)
                 }
         }
     }
@@ -145,8 +167,10 @@ struct ServerSidebar: View {
                 if selection == server.id { selection = nil }
                 store.delete(server.id)
             }
-        } message: { _ in
-            Text("保存したパスワードも削除されます。")
+        } message: { server in
+            Text(store.isShared(server.id)
+                 ? "会社で共有している接続先なので、全員の一覧から消えます。"
+                 : "保存したパスワードも削除されます。")
         }
         .confirmationDialog("フォルダ「\(pendingFolderDelete?.name ?? "")」を削除しますか？",
                             isPresented: isPresent($pendingFolderDelete), presenting: pendingFolderDelete) { folder in
@@ -154,7 +178,12 @@ struct ServerSidebar: View {
         } message: { _ in
             Text("中の接続先は削除されず、フォルダの外に移動します。")
         }
-        .alert(folderNameTarget.map { if case .new = $0 { "新規フォルダ" } else { "フォルダ名を変更" } } ?? "",
+        .alert(folderNameTarget.map {
+            switch $0 {
+            case .new(let shared): shared ? "新規共有フォルダ" : "新規フォルダ"
+            case .rename: "フォルダ名を変更"
+            }
+        } ?? "",
                isPresented: isPresent($folderNameTarget)) {
             TextField("フォルダ名", text: $folderName)
             Button("OK") { commitFolderName() }
@@ -166,7 +195,7 @@ struct ServerSidebar: View {
 
     private func rows(for servers: [ServerConfig]) -> some View {
         ForEach(sortedByName(servers)) { server in
-            ServerRow(server: server)
+            ServerRow(server: server, isShared: store.isShared(server.id))
                 .tag(server.id)
                 .draggable(server.id.uuidString)
                 .contextMenu { serverMenu(server) }
@@ -188,14 +217,31 @@ struct ServerSidebar: View {
         }
         Button("編集…") { editor = .init(server: server, isNew: false) }
         Button("複製") { duplicate(server) }
+        let isShared = store.isShared(server.id)
         if !store.folders.isEmpty {
             Menu("フォルダへ移動") {
-                Button("フォルダなし") { store.moveServer(server.id, toFolder: nil) }
+                Button("フォルダなし") { store.moveServer(server.id, toFolder: nil, shared: isShared) }
                     .disabled(server.folderID == nil)
                 Divider()
-                ForEach(store.folders) { folder in
-                    Button(folder.name) { store.moveServer(server.id, toFolder: folder.id) }
+                ForEach(isShared ? store.shared.folders : store.personalFolders) { folder in
+                    Button(folder.name) { store.moveServer(server.id, toFolder: folder.id, shared: isShared) }
                         .disabled(server.folderID == folder.id)
+                }
+            }
+        }
+        if store.shared.isEnabled {
+            Divider()
+            if isShared {
+                Button("自分だけの接続先にする") { store.moveServer(server.id, toFolder: nil, shared: false) }
+            } else {
+                Menu("会社で共有する") {
+                    Button("フォルダなし") { store.moveServer(server.id, toFolder: nil, shared: true) }
+                    if !store.shared.folders.isEmpty {
+                        Divider()
+                        ForEach(store.shared.folders) { folder in
+                            Button(folder.name) { store.moveServer(server.id, toFolder: folder.id, shared: true) }
+                        }
+                    }
                 }
             }
         }
@@ -203,8 +249,8 @@ struct ServerSidebar: View {
         Button("削除…", role: .destructive) { pendingDelete = server }
     }
 
-    private func folderHeader(_ folder: ServerFolder) -> some View {
-        Label(folder.name, systemImage: "folder")
+    private func folderHeader(_ folder: ServerFolder, shared: Bool) -> some View {
+        Label(folder.name, systemImage: shared ? "person.2" : "folder")
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             // 矢印だけでなくフォルダ名を押しても開閉する
@@ -212,14 +258,14 @@ struct ServerSidebar: View {
                 expansion(of: folder).wrappedValue.toggle()
             }
             .dropDestination(for: String.self) { ids, _ in
-                moveServers(ids, to: folder.id)
+                moveServers(ids, to: folder.id, shared: shared)
             }
             .contextMenu {
                 Button("名前を変更…") { startFolderName(.rename(folder)) }
                 Button("接続先を追加…") {
                     var draft = ServerConfig.newDraft
                     draft.folderID = folder.id
-                    editor = .init(server: draft, isNew: true)
+                    editor = .init(server: draft, isNew: true, shared: shared)
                 }
                 Divider()
                 Button("フォルダを削除…", role: .destructive) { pendingFolderDelete = folder }
@@ -234,7 +280,7 @@ struct ServerSidebar: View {
             set: { expanded in
                 // 一度に多くの行を挿入すると List がアニメーションを省き、段階的に出すと不自然になるので、
                 // 行の多いフォルダはアニメーションなしで開く
-                let animates = store.servers(inFolder: folder.id).count <= Self.animatedRowLimit
+                let animates = store.servers.filter { $0.folderID == folder.id }.count <= Self.animatedRowLimit
                 withAnimation(animates ? .smooth(duration: 0.25) : nil) {
                     if expanded {
                         collapsedIDs.remove(folder.id.uuidString)
@@ -250,9 +296,9 @@ struct ServerSidebar: View {
     private static let animatedRowLimit = 6
 
 
-    private func moveServers(_ ids: [String], to folderID: UUID?) -> Bool {
+    private func moveServers(_ ids: [String], to folderID: UUID?, shared: Bool) -> Bool {
         let uuids = ids.compactMap(UUID.init(uuidString:))
-        uuids.forEach { store.moveServer($0, toFolder: folderID) }
+        uuids.forEach { store.moveServer($0, toFolder: folderID, shared: shared) }
         return !uuids.isEmpty
     }
 
@@ -269,7 +315,7 @@ struct ServerSidebar: View {
         let name = folderName.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, let target = folderNameTarget else { return }
         switch target {
-        case .new: store.addFolder(named: name)
+        case .new(let shared): store.addFolder(named: name, shared: shared)
         case .rename(let folder): store.renameFolder(folder.id, to: name)
         }
     }
@@ -279,7 +325,7 @@ struct ServerSidebar: View {
         copy.id = UUID()
         copy.name += " のコピー"
         Passwords.setPassword(Passwords.password(for: server.id), for: copy.id)
-        store.upsert(copy)
+        store.upsert(copy, shared: store.isShared(server.id))
     }
 
     private func isPresent<T>(_ binding: Binding<T?>) -> Binding<Bool> {
@@ -289,11 +335,20 @@ struct ServerSidebar: View {
 
 private struct ServerRow: View {
     let server: ServerConfig
+    let isShared: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(server.name.isEmpty ? server.host : server.name)
-                .lineLimit(1)
+            HStack(spacing: 4) {
+                Text(server.name.isEmpty ? server.host : server.name)
+                    .lineLimit(1)
+                if isShared {
+                    Image(systemName: "person.2.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help("会社で共有している接続先")
+                }
+            }
             Text("\(server.serverProtocol.displayName)  \(server.host)")
                 .font(.caption)
                 .foregroundStyle(.secondary)

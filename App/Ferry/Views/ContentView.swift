@@ -14,6 +14,8 @@ struct ContentView: View {
     struct EditorRequest: Identifiable {
         var server: ServerConfig
         var isNew: Bool
+        /// 新しい接続先を会社で共有するか（最初の選択）
+        var shared = false
         var id: UUID { server.id }
     }
 
@@ -53,10 +55,17 @@ struct ContentView: View {
             Text(store.importError ?? "")
         }
         .sheet(item: $editor) { request in
-            ServerEditView(server: request.server, isNew: request.isNew) { server, password in
+            ServerEditView(server: request.server, isNew: request.isNew,
+                           shared: request.isNew ? request.shared : store.isShared(request.server.id)) { server, password, shared in
                 Passwords.setPassword(password, for: server.id)
                 sessions.close(server.id)
-                store.upsert(server)
+                if !request.isNew, store.isShared(server.id) != shared {
+                    // 共有する・しないを切り替えた: 今の場所で保存してから移す
+                    store.upsert(server)
+                    store.moveServer(server.id, toFolder: server.folderID, shared: shared)
+                } else {
+                    store.upsert(server, shared: shared)
+                }
                 selection = server.id
             }
         }

@@ -6,6 +6,8 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            SharedSettings()
+                .tabItem { Label("会社の共有", systemImage: "person.2") }
             PasswordSyncSettings(vault: vault)
                 .tabItem { Label("パスワード同期", systemImage: "key.icloud") }
             ExcludeSettings()
@@ -262,6 +264,67 @@ private struct PasswordSyncSettings: View {
             Button("同期をやめる", role: .destructive) { vault.disable() }
         } message: {
             Text("すべての Mac で同期が止まります。iCloud Drive の暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。")
+        }
+    }
+}
+
+/// 会社で共有する接続先（Dropbox などの共有フォルダ）
+private struct SharedSettings: View {
+    @Environment(ServerStore.self) private var store
+    @State private var confirmingStop = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Dropbox などの共有フォルダを選ぶと、そこに保存した接続先が会社の全員の一覧に表示されます。Windows 版の Ferry とも同じフォルダを使えます。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("パスワードは共有しません。それぞれが最初に接続するときに入力します。ローカルのフォルダやブックマークも PC ごとの設定です。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let directory = store.shared.directory {
+                Label("\(store.shared.servers.count) 件の接続先を共有しています", systemImage: "person.2.fill")
+                    .font(.headline)
+                Text(directory.path)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                HStack {
+                    Button("フォルダを変更…", action: choose)
+                    Button("Finder で開く") { NSWorkspace.shared.open(directory) }
+                    Spacer()
+                    Button("この Mac で共有をやめる…", role: .destructive) { confirmingStop = true }
+                }
+            } else {
+                HStack {
+                    Spacer()
+                    Button("共有フォルダを選ぶ…", action: choose)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            Spacer()
+        }
+        .padding()
+        .confirmationDialog("この Mac で共有の接続先を使うのをやめますか？", isPresented: $confirmingStop) {
+            Button("やめる", role: .destructive) { store.shared.setDirectory(nil) }
+        } message: {
+            Text("共有フォルダのファイルは消えないので、他の人には影響しません。")
+        }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.message = "会社で共有するフォルダを選んでください（例: Dropbox の中の「Ferry共有」フォルダ）"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "このフォルダを使う"
+        if panel.runModal() == .OK, let url = panel.url {
+            store.shared.setDirectory(url)
         }
     }
 }
