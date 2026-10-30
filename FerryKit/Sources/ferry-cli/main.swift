@@ -7,12 +7,16 @@ import FerryKit
 //   ferry-cli put  ftp://user@host ./local /remote/file
 //   ferry-cli mkdir|rm|rmdir <url> /path
 //   ferry-cli mv   <url> /from /to
+//   ferry-cli ls --server <接続先の名前> [/path]   … アプリに保存した接続先とパスワードを使う
+//   ferry-cli servers                              … アプリに保存した接続先の一覧
 // ftps:// は Explicit。Implicit は --implicit を付ける。
 // オプション: --implicit --insecure（証明書を検証しない） --active --key <秘密鍵> --verbose
-// パスワードは環境変数 FERRY_PASSWORD か、プロンプトで入力する。
+// パスワードは環境変数 FERRY_PASSWORD か、プロンプトで入力する（--server のときは保存したものを使う）。
 
 let usage = """
 使い方: ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> <ftp|ftps|sftp>://user@host[:port] [引数...]
+　　　 ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> --server <接続先の名前> [引数...]
+　　　 ferry-cli servers
 オプション: --implicit --insecure --active --key <秘密鍵> --verbose
 """
 
@@ -34,6 +38,7 @@ func formatSize(_ size: Int64?) -> String {
 var args = Array(CommandLine.arguments.dropFirst())
 var implicit = false, insecure = false, active = false, verbose = false
 var keyPath: String?
+var savedServerName: String?
 
 var positional: [String] = []
 var iterator = args.makeIterator()
@@ -46,43 +51,74 @@ while let arg = iterator.next() {
     case "--key":
         guard let value = iterator.next() else { fail("--key には秘密鍵のパスを指定してください") }
         keyPath = value
+    case "--server":
+        guard let value = iterator.next() else { fail("--server には接続先の名前を指定してください") }
+        savedServerName = value
     default: positional.append(arg)
     }
 }
 args = positional
 
-guard args.count >= 2 else { fail(usage) }
-let command = args[0]
-guard let components = URLComponents(string: args[1]), let scheme = components.scheme?.lowercased(),
-      let host = components.host else { fail("URL を解釈できません: \(args[1])") }
-
-let serverProtocol: ServerProtocol
-switch scheme {
-case "ftp": serverProtocol = .ftp
-case "ftps": serverProtocol = implicit ? .ftpsImplicit : .ftps
-case "sftp": serverProtocol = .sftp
-default: fail("対応していないプロトコルです: \(scheme)")
+if args.first == "servers" {
+    for server in SavedServers.all().sorted(by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) {
+        print("\(server.name)\t\(server.serverProtocol.rawValue)://\(server.username)@\(server.host):\(server.effectivePort)")
+    }
+    exit(0)
 }
 
-let server = ServerConfig(
-    name: host,
-    serverProtocol: serverProtocol,
-    host: host,
-    port: components.port,
-    username: components.user ?? "anonymous",
-    passiveMode: !active,
-    verifyCertificate: !insecure,
-    privateKeyPath: keyPath
-)
+let server: ServerConfig
+let password: String
+let rest: [String]
+/// URL で指定したパス（ls でパスを省いたときに使う）
+var urlPath: String?
 
-let password: String = ProcessInfo.processInfo.environment["FERRY_PASSWORD"]
-    ?? String(cString: getpass(keyPath == nil ? "パスワード: " : "鍵のパスフレーズ: "))
+if let savedServerName {
+    guard !args.isEmpty else { fail(usage) }
+    switch SavedServers.find(savedServerName) {
+    case .success(let found): server = found
+    case .failure(let error): fail(error.localizedDescription)
+    }
+    guard let saved = SavedServers.password(for: server.id) else {
+        fail("「\(server.name)」のパスワードを読めませんでした（アプリで保存しているか、キーチェーンの確認で許可したかを確かめてください）")
+    }
+    password = saved
+    urlPath = server.initialPath
+    rest = Array(args.dropFirst(1))
+} else {
+    guard args.count >= 2 else { fail(usage) }
+    guard let components = URLComponents(string: args[1]), let scheme = components.scheme?.lowercased(),
+          let host = components.host else { fail("URL を解釈できません: \(args[1])") }
+
+    let serverProtocol: ServerProtocol
+    switch scheme {
+    case "ftp": serverProtocol = .ftp
+    case "ftps": serverProtocol = implicit ? .ftpsImplicit : .ftps
+    case "sftp": serverProtocol = .sftp
+    default: fail("対応していないプロトコルです: \(scheme)")
+    }
+
+    server = ServerConfig(
+        name: host,
+        serverProtocol: serverProtocol,
+        host: host,
+        port: components.port,
+        username: components.user ?? "anonymous",
+        passiveMode: !active,
+        verifyCertificate: !insecure,
+        privateKeyPath: keyPath
+    )
+
+    password = ProcessInfo.processInfo.environment["FERRY_PASSWORD"]
+        ?? String(cString: getpass(keyPath == nil ? "パスワード: " : "鍵のパスフレーズ: "))
+    urlPath = components.path.isEmpty ? nil : components.path
+    rest = Array(args.dropFirst(2))
+}
+let command = args[0]
 
 // アプリに同梱したルート証明書で検証する場合に指定する
 RemoteClient.caBundlePath = ProcessInfo.processInfo.environment["FERRY_CA_BUNDLE"]
 let client = RemoteClient(server: server, password: password)
 client.debugLog = verbose
-let rest = Array(args.dropFirst(2))
 
 func argument(_ index: Int, _ name: String) -> String {
     guard index < rest.count else { fail("\(name) を指定してください\n\(usage)") }
@@ -101,8 +137,8 @@ do {
         let path: String
         if let first = rest.first {
             path = first
-        } else if !components.path.isEmpty {
-            path = components.path
+        } else if let urlPath {
+            path = urlPath
         } else {
             path = try await client.homeDirectory()
         }
