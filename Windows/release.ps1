@@ -90,7 +90,11 @@ try {
 
         if (-not $Local) {
             New-Item -ItemType Directory -Force $updateDirectory | Out-Null
-            Run dotnet @('vpk', 'upload', 'local', '--path', $updateDirectory, '-c', $channel, '-o', $releases, '--keepMaxReleases', '5')
+            # 共有した全員の Dropbox に同期されるので、置くのは最新の版だけにする（約 200MB）。
+            # 1 つ前の版の人は差分で、もっと古い版の人は完全版で更新できる
+            Run dotnet @('vpk', 'upload', 'local', '--path', $updateDirectory, '-c', $channel, '-o', $releases, '--keepMaxReleases', '1')
+            # ポータブル版（zip）は使わないので置かない（vpk には作らない設定が無いので、置いた後で消す）
+            Get-ChildItem $updateDirectory -Filter '*-Portable.zip' | Remove-Item -Force
         }
     }
 }

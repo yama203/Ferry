@@ -19,6 +19,8 @@
     <AssemblyName>Ferry</AssemblyName>
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets\Ferry.ico</ApplicationIcon>
+    <!-- 画面は日本語だけなので、ライブラリの他の言語のリソースは入れない（配布の大きさを減らす） -->
+    <SatelliteResourceLanguages>ja</SatelliteResourceLanguages>
     <!-- Velopack の起動処理を一番最初に呼ぶため、Main は Program.cs に自分で書く -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
@@ -33,7 +35,16 @@
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.4" />
+    <!--
+      Windows App SDK は使う部品だけを入れる（まとめのパッケージ Microsoft.WindowsAppSDK にすると
+      使わない AI・ML・検索・ウィジェットの部品（onnxruntime など 50MB 近く）まで同梱される）
+    -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.Base" Version="2.6.4" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.6.4" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Foundation" Version="2.6.4" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.6.4" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.DWrite" Version="2.6.4" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.6.4" />
     <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 

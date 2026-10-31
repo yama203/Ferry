@@ -215,7 +215,9 @@ cd Windows
 .\release.ps1 -Local       # 手元の Windows\Releases\ にパッケージを作るだけ（試し用）
 ```
 
-- 流れ: テスト → `dotnet publish`（自己完結、x64）→ `vpk pack` → `<共有フォルダ>\App\Windows` に置く（`vpk upload local`、古い版は 5 つまで）→ バージョンをコミットしてタグ `windows-vX.Y.Z` → GitHub のリリース（`gh auth login` 済みのときだけ）。
+- 流れ: テスト → `dotnet publish`（自己完結、x64）→ `vpk pack` → `<共有フォルダ>\App\Windows` に置く（`vpk upload local`）→ バージョンをコミットしてタグ `windows-vX.Y.Z` → GitHub のリリース（`gh auth login` 済みのときだけ）。
+- 共有フォルダは全員の Dropbox に同期されるので、置くのは Setup と最新の版（完全版と 1 つ前からの差分）だけ（約 160MB）。ポータブル版の zip は置かない。1 つ前の版の人は差分で、もっと古い版の人は完全版で更新される。
+- Windows App SDK はまとめのパッケージ（`Microsoft.WindowsAppSDK`）ではなく、使う部品（Base・Runtime・Foundation・InteractiveExperiences・DWrite・WinUI）だけを参照する。まとめのパッケージだと使わない AI・ML・検索の部品（onnxruntime・DirectML など 50MB 近く）まで同梱される。
 - 共有フォルダはこの PC の Ferry の設定（`settings.json` の `sharedDirectory`）から取る。`-SharedDirectory` でも指定できる。
 - `vpk`（Velopack の CLI）は `Windows/dotnet-tools.json` のローカルツール。`dotnet tool restore` で入る。
 - パッケージ ID は **FerryApp**（インストール先は `%LOCALAPPDATA%\FerryApp`）。`Ferry` にすると設定を置いている `%LOCALAPPDATA%\Ferry` と重なり、アンインストールで設定まで消える。画面やショートカットの名前は「Ferry」。
