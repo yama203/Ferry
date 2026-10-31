@@ -7,6 +7,7 @@ import FerryKit
 //   ferry-cli get -r <url> /remote/folder ./local   … フォルダごと（同じサイズ・日時のファイルは飛ばす）
 //                                                    --parallel <数> で同時に使う接続の数（既定は 4）
 //   ferry-cli put  ftp://user@host ./local /remote/file
+//   ferry-cli put -r <url> ./local/folder /remote/folder … フォルダごと（同じサイズでサーバーの方が新しいファイルは飛ばす）
 //   ferry-cli mkdir|rm|rmdir <url> /path
 //   ferry-cli mv   <url> /from /to
 //   ferry-cli ls --server <接続先の名前> [/path]   … アプリに保存した接続先とパスワードを使う
@@ -19,7 +20,7 @@ let usage = """
 使い方: ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> <ftp|ftps|sftp>://user@host[:port] [引数...]
 　　　 ferry-cli <ls|pwd|get|put|mkdir|rm|rmdir|mv> --server <接続先の名前> [引数...]
 　　　 ferry-cli servers
-オプション: --implicit --insecure --active --key <秘密鍵> --verbose -r（get でフォルダごと） --parallel <接続数>
+オプション: --implicit --insecure --active --key <秘密鍵> --verbose -r（get・put でフォルダごと） --parallel <接続数>
 """
 
 func fail(_ message: String) -> Never {
@@ -177,8 +178,18 @@ do {
     case "put":
         let local = URL(fileURLWithPath: argument(0, "ローカルのファイル"))
         let remote = argument(1, "アップロード先のパス")
-        try await client.upload(local, to: remote, progress: printProgress)
-        print("\n✅ アップロード完了: \(remote)")
+        if recursive {
+            var result = FolderUpload()
+            try await result.run(server: server, password: password, verbose: verbose, local, to: remote,
+                                 connections: parallel)
+            print("✅ アップロード完了: \(remote)（\(result.uploaded) 件アップロード、\(result.skipped) 件は変更なし）")
+            if !result.failures.isEmpty {
+                fail("❌ \(result.failures.count) 件アップロードできませんでした:\n" + result.failures.joined(separator: "\n"))
+            }
+        } else {
+            try await client.upload(local, to: remote, progress: printProgress)
+            print("\n✅ アップロード完了: \(remote)")
+        }
 
     case "mkdir":
         try await client.makeDirectory(argument(0, "フォルダのパス"))
