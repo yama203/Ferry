@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="Ferry.Views.ServerEditDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="保存"
+    CloseButtonText="キャンセル"
+    DefaultButton="Primary"
+    PrimaryButtonClick="Save_Click">
+
+    <ScrollViewer MaxHeight="560" Width="460" Padding="0,0,16,0">
+        <StackPanel Spacing="12">
+            <TextBox x:Name="NameBox" Header="名前" PlaceholderText="空ならホスト名" />
+
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="110" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="ProtocolBox" Header="方式" HorizontalAlignment="Stretch" SelectionChanged="ProtocolBox_SelectionChanged" />
+                <NumberBox x:Name="PortBox" Grid.Column="1" Header="ポート" Minimum="1" Maximum="65535"
+                           SpinButtonPlacementMode="Hidden" ValidationMode="InvalidInputOverwritten" />
+            </Grid>
+
+            <TextBox x:Name="HostBox" Header="ホスト" PlaceholderText="ftp.example.com" TextChanged="Required_TextChanged" />
+            <TextBox x:Name="UserBox" Header="ユーザー名" />
+            <PasswordBox x:Name="PasswordInput" Header="パスワード" />
+            <CheckBox x:Name="SavePasswordCheck" Content="パスワードをこの PC に保存する" IsChecked="True" Margin="0,-6,0,0" />
+
+            <Grid x:Name="PrivateKeyRow" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="PrivateKeyBox" Header="秘密鍵（使う場合。パスワード欄は鍵のパスフレーズ）" PlaceholderText="C:\Users\…\.ssh\id_ed25519" />
+                <Button Grid.Column="1" Content="参照…" VerticalAlignment="Bottom" Click="BrowseKey_Click" />
+            </Grid>
+
+            <TextBox x:Name="RemotePathBox" Header="最初に開くサーバーのフォルダ" PlaceholderText="空ならログイン時のフォルダ" />
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="LocalPathBox" Header="最初に開くこの PC のフォルダ" PlaceholderText="空ならユーザーのフォルダ" />
+                <Button Grid.Column="1" Content="参照…" VerticalAlignment="Bottom" Click="BrowseLocal_Click" />
+            </Grid>
+
+            <ToggleSwitch x:Name="PassiveSwitch" Header="パッシブモード" OnContent="オン" OffContent="オフ" IsOn="True" />
+            <ToggleSwitch x:Name="VerifySwitch" Header="サーバーの証明書を検証する" OnContent="する" OffContent="しない（自己署名など）" IsOn="True" />
+
+            <CheckBox x:Name="SharedCheck" Content="会社で共有する（共有フォルダに保存。パスワードは共有しません）" Checked="SharedCheck_Changed" Unchecked="SharedCheck_Changed" />
+            <ComboBox x:Name="FolderBox" Header="サイドバーのフォルダ" HorizontalAlignment="Stretch" DisplayMemberPath="Name" />
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>

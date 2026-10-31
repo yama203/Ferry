@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="Ferry.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- Ferry の青（ライト #2A6FE0、ダーク #4C8DFF）をアクセントカラーにする -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <Color x:Key="SystemAccentColor">#2A6FE0</Color>
+                    <Color x:Key="SystemAccentColorDark1">#2A6FE0</Color>
+                    <Color x:Key="SystemAccentColorDark2">#1F58B8</Color>
+                    <Color x:Key="SystemAccentColorDark3">#16428C</Color>
+                    <Color x:Key="SystemAccentColorLight1">#4C8DFF</Color>
+                    <Color x:Key="SystemAccentColorLight2">#7AABFF</Color>
+                    <Color x:Key="SystemAccentColorLight3">#A9C9FF</Color>
+                    <Color x:Key="FerryBlue">#2A6FE0</Color>
+                    <SolidColorBrush x:Key="FerryBlueBrush" Color="#2A6FE0" />
+                    <!-- サーバー側の見出しにうっすら敷く -->
+                    <SolidColorBrush x:Key="FerryRemoteHeaderBrush" Color="#2A6FE0" Opacity="0.08" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <Color x:Key="SystemAccentColor">#4C8DFF</Color>
+                    <Color x:Key="SystemAccentColorDark1">#3A7BF0</Color>
+                    <Color x:Key="SystemAccentColorDark2">#2A6FE0</Color>
+                    <Color x:Key="SystemAccentColorDark3">#1F58B8</Color>
+                    <Color x:Key="SystemAccentColorLight1">#3A7BF0</Color>
+                    <Color x:Key="SystemAccentColorLight2">#4C8DFF</Color>
+                    <Color x:Key="SystemAccentColorLight3">#7AABFF</Color>
+                    <Color x:Key="FerryBlue">#4C8DFF</Color>
+                    <SolidColorBrush x:Key="FerryBlueBrush" Color="#4C8DFF" />
+                    <SolidColorBrush x:Key="FerryRemoteHeaderBrush" Color="#4C8DFF" Opacity="0.12" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- ペインの見出しの小さなボタン -->
+            <Style x:Key="PaneButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Padding" Value="8,5" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+            </Style>
+            <!-- 一覧の列の見出し -->
+            <Style x:Key="ColumnHeaderButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Padding" Value="4,2" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="Ferry.Views.SettingsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="設定"
+    PrimaryButtonText="保存"
+    CloseButtonText="キャンセル"
+    DefaultButton="Primary"
+    PrimaryButtonClick="Save_Click">
+
+    <Pivot Width="480" Height="420">
+        <PivotItem Header="会社の共有">
+            <StackPanel Spacing="12" Margin="0,12,0,0">
+                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="Dropbox などの共有フォルダに接続先を置くと、会社の人と同じ一覧を使えます（Mac 版と同じ形式）。パスワードは共有せず、各自の PC に保存します。" />
+                <TextBlock x:Name="SharedPathText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="共有フォルダを選択…" Click="ChooseShared_Click" />
+                    <Button x:Name="StopSharingButton" Content="共有をやめる" Click="StopSharing_Click" />
+                </StackPanel>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="共有をやめても、共有フォルダのファイルは消えません。" />
+            </StackPanel>
+        </PivotItem>
+        <PivotItem Header="除外">
+            <StackPanel Spacing="8" Margin="0,12,0,0">
+                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="フォルダを転送・同期するときに含めないファイル名（1 行に 1 つ。* と ? が使えます）。直接選んだ項目には適用しません。" />
+                <TextBox x:Name="ExcludeBox" AcceptsReturn="True" Height="260" FontFamily="Consolas" TextWrapping="NoWrap"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                <HyperlinkButton Content="既定に戻す" Click="ResetExclude_Click" Padding="0" />
+            </StackPanel>
+        </PivotItem>
+        <PivotItem Header="エディタ">
+            <StackPanel Spacing="12" Margin="0,12,0,0">
+                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="サーバーのファイルを右クリックの「エディタで開く」で開くアプリ。保存するたびにサーバーへアップロードします。" />
+                <TextBlock x:Name="EditorNameText" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                <TextBlock x:Name="EditorPathText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="エディタを選択…" Click="ChooseEditor_Click" />
+                    <Button x:Name="ResetEditorButton" Content="VS Code に戻す" Click="ResetEditor_Click" />
+                </StackPanel>
+            </StackPanel>
+        </PivotItem>
+        <PivotItem Header="通知">
+            <StackPanel Spacing="12" Margin="0,12,0,0">
+                <ToggleSwitch x:Name="NotifySwitch" Header="転送・同期が終わったら通知する"
+                              OnContent="通知する" OffContent="通知しない" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           Text="1 回の操作で始めた転送が全部終わったときに、まとめて 1 回通知します。エディタの保存による自動アップロードでは通知しません。" />
+                <HyperlinkButton Content="通知を試す" Click="TestNotification_Click" Padding="0" />
+            </StackPanel>
+        </PivotItem>
+    </Pivot>
+</ContentDialog>
