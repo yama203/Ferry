@@ -29,8 +29,13 @@ function Run([string]$command, [string[]]$arguments) {
     if ($LASTEXITCODE -ne 0) { Fail "$command $($arguments -join ' ') が失敗しました" }
 }
 
-if (-not $Local -and (git status --porcelain)) {
-    Fail 'コミットしていない変更があります。先にコミットしてください'
+if (-not $Local) {
+    if (git status --porcelain) { Fail 'コミットしていない変更があります。先にコミットしてください' }
+    # GitHub 側が先に進んでいると最後のプッシュで失敗するので、ビルドの前に確かめる
+    Run git @('fetch', '-q', 'origin')
+    if ([int](git rev-list --count 'HEAD..@{upstream}') -gt 0) {
+        Fail 'GitHub 側にこの PC に無いコミットがあります。先に git pull で取り込んでください'
+    }
 }
 
 # バージョン
@@ -121,19 +126,26 @@ Ferry for Windows $Version（$(Get-Date -Format 'yyyy-MM-dd HH:mm') に作成）
 Write-Host "☁️  $updateDirectory に置きました"
 
 # リリースノート: 前の Windows 版のタグからのコミットの 1 行目（バージョン更新のコミットは除く）
-$previous = git describe --tags --abbrev=0 --match 'windows-v*' 2>$null
+# （git describe はタグが無いとエラーを出し、$ErrorActionPreference = 'Stop' で止まるので、一覧から選ぶ）
+$previous = git tag --list 'windows-v*' --sort=-v:refname | Select-Object -First 1
 $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
 $notes = (git log --pretty='- %s' $range -- . | Where-Object { $_ -notmatch '^- (Windows 版の)?バージョン ' }) -join "`n"
 $notesFile = Join-Path $PSScriptRoot 'Releases\notes.md'
 [IO.File]::WriteAllText($notesFile, "## 変更点`n$(if ($notes) { $notes } else { '- 初回リリース' })", (New-Object Text.UTF8Encoding($false)))
 
-git add $project
-git commit -qm "Windows 版のバージョン $Version"
-git tag $tag
-git push -q origin HEAD --tags
+Run git @('add', $project)
+Run git @('commit', '-qm', "Windows 版のバージョン $Version")
+Run git @('tag', $tag)
+Run git @('push', '-q', 'origin', 'HEAD', $tag)
 
 # GitHub のリリースにも置く（gh でログインしていれば）
-$token = if (Get-Command gh -ErrorAction SilentlyContinue) { gh auth token 2>$null } else { $env:GITHUB_TOKEN }
+$token = $env:GITHUB_TOKEN
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    # ログインしていないと gh はエラーを出すので、止まらないようにする
+    $ErrorActionPreference = 'Continue'
+    $token = gh auth token 2>$null
+    $ErrorActionPreference = 'Stop'
+}
 if ($token) {
     foreach ($runtime in $runtimes) {
         $channel = if ($runtime -eq 'win-arm64') { 'win-arm64' } else { 'win' }
