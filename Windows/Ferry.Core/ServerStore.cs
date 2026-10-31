@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ferry.Core.Import;
 
 namespace Ferry.Core;
 
@@ -280,13 +281,13 @@ public sealed class ServerStore : IDisposable
     // MARK: 読み込み（FileZilla・WinSCP から）
 
     /// <summary>
-    /// 読み込んだ接続先を追加する。同じ接続先（ホスト・ユーザー・ポート・プロトコル）は飛ばす。
-    /// フォルダは同名のものがあればそこに入れる。戻り値は追加した件数。
+    /// 読み込んだ接続先を自分の接続先に追加する。同じ接続先（ホスト・ユーザー・ポート・プロトコル）は飛ばす。
+    /// フォルダは同名のものがあればそこに入れる。読めたパスワードは保存する。戻り値は追加したもの。
     /// </summary>
-    public int Import(IEnumerable<(string? FolderName, IReadOnlyList<ServerConfig> Servers)> groups)
+    public IReadOnlyList<ImportedServer> Import(ImportResult result)
     {
-        var added = 0;
-        foreach (var (folderName, servers) in groups)
+        var added = new List<ImportedServer>();
+        foreach (var (folderName, servers) in result.Folders)
         {
             Guid? folderId = null;
             if (folderName is not null)
@@ -299,19 +300,21 @@ public sealed class ServerStore : IDisposable
                     folderId = folder.Id;
                 }
             }
-            foreach (var server in servers)
+            foreach (var imported in servers)
             {
-                if (Servers.Any(s => s.IsSameDestination(server))) continue;
-                _personalServers.Add(server with { FolderId = folderId });
-                added++;
+                if (Servers.Any(s => s.IsSameDestination(imported.Server))) continue;
+                var server = imported.Server with { FolderId = folderId };
+                _personalServers.Add(server);
+                if (imported.Password is { Length: > 0 } password) _passwords?.SetPassword(server.Id, password);
+                added.Add(imported with { Server = server });
             }
         }
         Save();
         return added;
     }
 
-    public int DuplicateCount(IEnumerable<ServerConfig> servers) =>
-        servers.Count(server => Servers.Any(s => s.IsSameDestination(server)));
+    public int DuplicateCount(ImportResult result) =>
+        result.AllServers.Count(imported => Servers.Any(s => s.IsSameDestination(imported.Server)));
 
     // MARK: 除外ルール
 

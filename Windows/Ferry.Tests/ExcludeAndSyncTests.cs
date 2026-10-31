@@ -173,4 +173,12 @@ public class PathAndPermissionTests
     {
         Assert.Equal(kind, FtpRemoteClient.FromReply(code, message).Kind);
     }
+
+    [Fact]
+    public void FluentFTPが付ける前置きは取り除く()
+    {
+        var error = FtpRemoteClient.FromReply("550", "Code: 550 Message: Access denied.");
+        Assert.Equal(FerryErrorKind.PermissionDenied, error.Kind);
+        Assert.Equal("権限がありません。（サーバーの応答: Access denied.）", error.Message);
+    }
 }

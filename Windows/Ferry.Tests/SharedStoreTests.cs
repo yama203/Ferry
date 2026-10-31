@@ -181,20 +181,24 @@ public class SharedStoreTests
     [Fact]
     public void 読み込みでは同じ接続先を飛ばし同名のフォルダに入れる()
     {
-        var (temp, store, _) = MakeStore();
+        var (temp, store, passwords) = MakeStore();
         using var _1 = temp;
         using var _2 = store;
         var folder = store.AddFolder("FileZilla");
         store.Upsert(new ServerConfig { Name = "既存", Host = "a.example.com", Username = "u", Port = 21 });
 
-        var added = store.Import([
-            ("FileZilla", [
-                new ServerConfig { Name = "同じ", Host = "a.example.com", Username = "u" },
-                new ServerConfig { Name = "新しい", Host = "b.example.com", Username = "u" },
-            ]),
-        ]);
+        var result = new Ferry.Core.Import.ImportResult();
+        result.Add("FileZilla", new(new ServerConfig { Name = "同じ", Host = "a.example.com", Username = "u" }, "p1"));
+        result.Add("FileZilla", new(new ServerConfig { Name = "新しい", Host = "b.example.com", Username = "u" }, "p2"));
+        Assert.Equal(1, store.DuplicateCount(result));
 
-        Assert.Equal(1, added);
+        var added = store.Import(result);
+
+        var server = Assert.Single(added).Server;
+        Assert.Equal("新しい", server.Name);
+        // 読めたパスワードは追加したものだけ保存する
+        Assert.Equal("p2", passwords.GetPassword(server.Id));
+        Assert.Single(passwords.Passwords);
         Assert.Equal(folder.Id, store.PersonalServers.Single(s => s.Name == "新しい").FolderId);
         Assert.Single(store.PersonalFolders);
     }

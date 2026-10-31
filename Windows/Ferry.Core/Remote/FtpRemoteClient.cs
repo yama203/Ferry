@@ -348,6 +348,8 @@ public sealed class FtpRemoteClient : IRemoteClient
     /// <summary>FTP の応答コードから分類する（550 は「無い」と「権限が無い」の両方に使われるので文面も見る）</summary>
     internal static FerryException FromReply(string? code, string message, Exception? inner = null)
     {
+        // FluentFTP は「Code: 550 Message: Access denied.」の形にするので、サーバーの文面だけにする
+        message = System.Text.RegularExpressions.Regex.Replace(message, @"^Code:\s*\d+\s*Message:\s*", "");
         var lower = message.ToLowerInvariant();
         if (code == "530") return FerryException.LoginFailed(inner);
         if (lower.Contains("permission") || lower.Contains("denied") || lower.Contains("not allowed") || code is "553" or "532")
