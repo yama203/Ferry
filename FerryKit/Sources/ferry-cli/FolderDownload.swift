@@ -134,8 +134,8 @@ struct FolderDownload {
     }
 }
 
-/// 接続ごとの作業が、次のファイルを 1 件ずつ取り出す
-private actor JobQueue<Job: Sendable> {
+/// 接続ごとの作業が、次のファイルを 1 件ずつ取り出す（FolderUpload でも使う）
+actor JobQueue<Job: Sendable> {
     private var jobs: [Job]
     private var index = 0
 

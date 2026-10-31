@@ -31,8 +31,8 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yama.Ferry
-        MARKETING_VERSION: "0.8"
-        CURRENT_PROJECT_VERSION: "8"
+        MARKETING_VERSION: "0.9"
+        CURRENT_PROJECT_VERSION: "9"
         SWIFT_VERSION: "5.0"
         # 無料の Apple Development 証明書で署名。チーム ID があるとビルドし直してもキーチェーンの許可が保たれる。サンドボックスなし（iCloud Drive のフォルダと Homebrew の libcurl を使うため）
         CODE_SIGN_IDENTITY: "Apple Development"
