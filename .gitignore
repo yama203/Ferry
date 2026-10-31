@@ -7,3 +7,7 @@ DerivedData/
 App/build/
 App/Ferry.xcodeproj/
 App/Tools/IconConcepts/
+Windows/**/bin/
+Windows/**/obj/
+Windows/.vs/
+*.user

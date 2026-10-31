@@ -192,3 +192,25 @@ Windows の資格情報マネージャーに、ターゲット名 `Ferry:<接続
 6. Velopack での配布と自動更新、`release.ps1`。
 
 公開テストサーバー `test.rebex.net`（ユーザー `demo`、パスワード `password`）は FTP / FTPS（Explicit・Implicit）/ SFTP すべてで読み取り専用の動作確認に使える。
+
+## 進み具合
+
+- [x] 1. `Ferry.Core`: 接続先の保存（自分・共有・PC ごとの設定）、除外ルール、同期の比較、資格情報マネージャー。Mac 版の形式のサンプル（`Ferry.Tests/Fixtures/`）を読み書きするテスト付き
+- [x] 2 の通信部分: `Ferry.Core/Remote/`（FTP / FTPS は FluentFTP、SFTP は SSH.NET）。test.rebex.net で 4 方式とも一覧・ダウンロード・エラーの分類を確認済み
+- [ ] 2 の画面（WinUI 3 のアプリ `Ferry/`）〜 6
+
+テストの実行（.NET 10 SDK が必要）:
+
+```
+cd Windows
+dotnet test                                  # すべて（test.rebex.net への接続を含む）
+dotnet test --filter "Category!=Network"     # ネットワークを使わないものだけ
+```
+
+### 作りの決めごと（Windows 版だけのもの）
+
+- 書き出す JSON は Mac 版と同じく、キーをアルファベット順に並べ、日本語はそのまま書く。この版が知らないキーは消さずに残す（Mac 版で後から増えたキーを Windows 版が消さないように）。
+- `passiveMode` と `verifyCertificate` は Mac 版では必須のキーなので、既定値でも必ず書く。
+- パッシブモードは `PASVEX`（PASV の応答の IP を無視）。IPv6 で接続したときだけ `EPSV`。
+- SFTP のホスト鍵の記録は `%APPDATA%\Ferry\known_hosts.json`（PC ごと。共有しない）。
+- FluentFTP は接続できなかった理由を 1 つにまとめてしまうので、ホスト名を引き直して「見つからない」かを判断し、かかった時間で「タイムアウト」と「断られた」を分ける。

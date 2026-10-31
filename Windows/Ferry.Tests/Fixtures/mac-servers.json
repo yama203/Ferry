@@ -1,0 +1,63 @@
+{
+  "excludePatterns" : [
+    ".git",
+    "node_modules",
+    "*.swp"
+  ],
+  "folders" : [
+    {
+      "id" : "0A6C1E7B-3F2D-4C8E-9B1A-2D3E4F5A6B7C",
+      "name" : "お客様サーバー"
+    }
+  ],
+  "futureKey" : "Mac 版で後から増えたキー",
+  "servers" : [
+    {
+      "bookmarks" : [
+        {
+          "id" : "5E3D2C1B-0A9F-4E8D-7C6B-5A4F3E2D1C0B",
+          "localPath" : "\/Users\/yama\/Sites\/theme",
+          "name" : "テーマ",
+          "remotePath" : "\/www.example.com\/wp\/wp-content\/themes\/xxx"
+        }
+      ],
+      "folderID" : "0A6C1E7B-3F2D-4C8E-9B1A-2D3E4F5A6B7C",
+      "host" : "yamagamikaju.kappe.ne.jp",
+      "id" : "6F1C2E1A-1234-4ABC-8DEF-0123456789AB",
+      "initialPath" : "\/www.example.com\/wp\/wp-content\/themes\/xxx",
+      "localPath" : "\/Users\/yama\/Sites",
+      "name" : "山神果樹薬草園",
+      "passiveMode" : true,
+      "port" : 10021,
+      "serverProtocol" : "ftps",
+      "startBookmarkID" : "5E3D2C1B-0A9F-4E8D-7C6B-5A4F3E2D1C0B",
+      "username" : "kaju",
+      "verifyCertificate" : false
+    },
+    {
+      "host" : "example.com",
+      "id" : "7A2B3C4D-5E6F-4A1B-9C2D-3E4F5A6B7C8D",
+      "name" : "SFTP の例",
+      "passiveMode" : true,
+      "privateKeyPath" : "~\/.ssh\/id_ed25519",
+      "serverProtocol" : "sftp",
+      "username" : "deploy",
+      "verifyCertificate" : true
+    },
+    {
+      "host" : "implicit.example.com",
+      "id" : "8B3C4D5E-6F7A-4B2C-8D3E-4F5A6B7C8D9E",
+      "name" : "Implicit",
+      "passiveMode" : false,
+      "serverProtocol" : "ftpsImplicit",
+      "username" : "user",
+      "verifyCertificate" : true
+    }
+  ],
+  "sharedOverrides" : {
+    "9C4D5E6F-7A8B-4C3D-9E4F-5A6B7C8D9EAF" : {
+      "localPath" : "\/Users\/yama\/Work"
+    }
+  },
+  "version" : 2
+}
