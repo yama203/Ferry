@@ -23,7 +23,7 @@ Apple シリコン（M1 以降）の Mac、macOS 15 以降で動く。Homebrew �
 
 ## Windows 版
 
-`Windows/` で作成中（C# / .NET 10）。今は画面に依存しない部分（`Ferry.Core`：接続先の保存・通信・同期の比較）とテストまで。仕様と進み具合は [docs/WINDOWS_PORT.md](docs/WINDOWS_PORT.md)。
+`Windows/` で作成中（C# / .NET 10、WinUI 3）。接続先の管理（会社の共有を含む）、接続、2 ペインの一覧表示とファイル操作、転送（ドラッグ&ドロップ・上書きの確認・転送一覧・通知）、プレビュー、エディタで開いて自動アップロード、同期、ブックマーク、FileZilla / WinSCP からの読み込み、Velopack での配布と自動更新（`Windows\release.ps1`）までできている。インストーラーと更新は会社の共有フォルダ（`<共有フォルダ>\App\Windows`）に置く。仕様と進み具合は [docs/WINDOWS_PORT.md](docs/WINDOWS_PORT.md)。
 
 ## 開発
 

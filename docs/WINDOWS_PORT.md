@@ -197,15 +197,45 @@ Windows の資格情報マネージャーに、ターゲット名 `Ferry:<接続
 
 - [x] 1. `Ferry.Core`: 接続先の保存（自分・共有・PC ごとの設定）、除外ルール、同期の比較、資格情報マネージャー。Mac 版の形式のサンプル（`Ferry.Tests/Fixtures/`）を読み書きするテスト付き
 - [x] 2 の通信部分: `Ferry.Core/Remote/`（FTP / FTPS は FluentFTP、SFTP は SSH.NET）。test.rebex.net で 4 方式とも一覧・ダウンロード・エラーの分類を確認済み
-- [ ] 2 の画面（WinUI 3 のアプリ `Ferry/`）〜 6
+- [x] 2 の画面（WinUI 3 のアプリ `Ferry/`）: サイドバー（検索・フォルダの開閉・共有・右クリック・見出しへのドラッグで移動・保存場所の表示）、2 ペイン（パンくず・並べ替え・隠しファイル・境界線の幅を覚える）、接続先の追加・編集、パスワード入力・証明書・エラーの画面、設定（会社の共有・除外）、前回の接続先を開く。ファイル操作は新規フォルダ・名前の変更・パーミッション・削除・パスをコピー・エクスプローラーで表示
+- [ ] 2 の残り: 列幅を覚える、スペースでプレビュー（4 で）、アイコン（`.ico`）
+- [x] 3. 転送: ダブルクリック・右クリック・ツールバー・ドラッグ&ドロップ（ペイン間、エクスプローラー ⇄ サーバー、エクスプローラーのフォルダを左へで移動）、フォルダは中身ごと（除外ルールは中身だけ）、上書きの確認をまとめて 1 回、転送一覧（進み具合・中止・再試行・完了の消去）、まとめて 1 回の通知。転送するファイルの洗い出しは `Ferry.Core/TransferPlanner.cs`（テスト付き）
+- [x] 4. プレビュー（スペースで開閉・↑↓で次、画像・テキスト・HTML/PDF/SVG、サーバーのファイルは一時フォルダへ、5MB までは 0.25 秒止まったら先読み）、エディタで開いて自動アップロード（`Ferry.Core/EditWatcher.cs`、ツールバーの「編集中」）、同期（方向の切り替え・ミラー・タイルで絞り込み・項目ごとのチェック・完了の通知）、ブックマーク（ツールバーとサイドバーの右クリック）
+- [x] 5. 設定画面のエディタ・通知のタブ、FileZilla / WinSCP からの読み込み（`Ferry.Core/Import/`、サンプルファイルでテスト）。FileZilla は入れ子のフォルダを「親 / 子」にまとめ、base64 のパスワードは読んで保存する（マスターパスワードで暗号化されたものは読めない）。WinSCP はレジストリ → WinSCP.ini の順に探し、パスワードは読まない
+- [x] 6. Velopack での配布と自動更新、`release.ps1`。この PC にインストール → 0.1.2 への差分の自動更新 → 再起動まで確認済み（共有フォルダ・GitHub への公開はまだ一度もしていない）
+- [ ] 残り: 列幅を覚える、共有フォルダ・エクスプローラーとのドラッグ・ミラー・エディタで開くの実地での確認
 
-テストの実行（.NET 10 SDK が必要）:
+### 配布（release.ps1）
 
 ```
 cd Windows
-dotnet test                                  # すべて（test.rebex.net への接続を含む）
-dotnet test --filter "Category!=Network"     # ネットワークを使わないものだけ
+.\release.ps1              # 末尾の数字を 1 つ上げて配る（0.1.0 → 0.1.1）
+.\release.ps1 0.2.0        # バージョンを指定
+.\release.ps1 -Arm64       # ARM 版 Windows 用も作る
+.\release.ps1 -Local       # 手元の Windows\Releases\ にパッケージを作るだけ（試し用）
 ```
+
+- 流れ: テスト → `dotnet publish`（自己完結、x64）→ `vpk pack` → `<共有フォルダ>\App\Windows` に置く（`vpk upload local`、古い版は 5 つまで）→ バージョンをコミットしてタグ `windows-vX.Y.Z` → GitHub のリリース（`gh auth login` 済みのときだけ）。
+- 共有フォルダはこの PC の Ferry の設定（`settings.json` の `sharedDirectory`）から取る。`-SharedDirectory` でも指定できる。
+- `vpk`（Velopack の CLI）は `Windows/dotnet-tools.json` のローカルツール。`dotnet tool restore` で入る。
+- パッケージ ID は **FerryApp**（インストール先は `%LOCALAPPDATA%\FerryApp`）。`Ferry` にすると設定を置いている `%LOCALAPPDATA%\Ferry` と重なり、アンインストールで設定まで消える。画面やショートカットの名前は「Ferry」。
+- 会社の人へは `FerryApp-win-Setup.exe` を案内する（共有フォルダに「はじめにお読みください.txt」も置く）。署名は無いので、初回は「詳細情報」→「実行」。
+- アプリは起動後に共有フォルダの更新を確認してダウンロードし、窓の上に「再起動して更新」を出す（押さなくても次の起動で入れ替わる）。置き場所は設定の `updateDirectory` で変えられる（無ければ `<共有フォルダ>\App\Windows`）。
+- WinUI の起動の入口は `Program.cs`（Velopack の処理を最初に呼ぶため、XAML が作る Main は `DISABLE_XAML_GENERATED_MAIN` で止めている）。
+- `EnableMsixTooling` が無いと publish に `Ferry.pri` が入らず、インストール版が起動時に落ちる。
+- アイコンは `Windows\Tools\make-ico.ps1` で Mac 版の PNG から `Ferry\Assets\Ferry.ico` を作る。
+- `.ps1` は BOM 付きの UTF-8 で保存する（Windows PowerShell 5.1 は BOM が無いと日本語を読み違える）。
+
+ビルドとテスト（.NET 10 SDK が必要。Visual Studio は無くてもよい）:
+
+```
+cd Windows
+dotnet build Ferry -p:Platform=x64           # アプリ（Ferry\bin\x64\Debug\…\Ferry.exe）
+dotnet test Ferry.Tests                      # すべて（test.rebex.net への接続を含む）
+dotnet test Ferry.Tests --filter "Category!=Network"   # ネットワークを使わないものだけ
+```
+
+想定外のエラーは `%LOCALAPPDATA%\Ferry\ferry.log` に残す。この PC だけの設定（共有フォルダの場所、閉じているフォルダ、前回の接続先、ペインの幅など）は `%LOCALAPPDATA%\Ferry\settings.json`。
 
 ### 作りの決めごと（Windows 版だけのもの）
 
@@ -214,3 +244,9 @@ dotnet test --filter "Category!=Network"     # ネットワークを使わない
 - パッシブモードは `PASVEX`（PASV の応答の IP を無視）。IPv6 で接続したときだけ `EPSV`。
 - SFTP のホスト鍵の記録は `%APPDATA%\Ferry\known_hosts.json`（PC ごと。共有しない）。
 - FluentFTP は接続できなかった理由を 1 つにまとめてしまうので、ホスト名を引き直して「見つからない」かを判断し、かかった時間で「タイムアウト」と「断られた」を分ける。
+- ローカル側の一番上は「この PC」（ドライブの一覧）。ローカルの削除はごみ箱へ（確認なし）、サーバーの削除は確認してから完全に削除（既定のボタンは「キャンセル」）。
+- ダウンロードしたファイルの更新日時はサーバーに揃える（同期で「変更あり」と判定されないように）。サーバーのファイル名に Windows で使えない文字（`\ / : * ? " < > |`）があれば全角に置き換える。
+- サーバー側からエクスプローラーへのドラッグは、ファイルは落とされたときに読み出す仮想ファイル（`StorageFile.CreateStreamedFileAsync`）、フォルダは一時フォルダ（`%TEMP%\Ferry\drag\`）へ中身ごとダウンロードしてから渡す。
+- プレビューの窓はアクティブにしないで出す（一覧で ↑↓ やスペースを続けて使えるように）。テキストは UTF-8 で読めなければ Shift_JIS。WebView2 のデータは `%LOCALAPPDATA%\Ferry\WebView2`。
+- プレビュー・編集用のダウンロードは `%TEMP%\Ferry\Preview\`・`%TEMP%\Ferry\Edit\`。プレビューは「接続先・パス・サイズ」ごとに置くので、同じサイズのものは使い回す。
+- パンくず（BreadcrumbBar）には項目のテンプレートを使わない。幅が足りないときの「…」の項目に null が渡され、x:Bind が落ちる。

@@ -11,3 +11,5 @@ Windows/**/bin/
 Windows/**/obj/
 Windows/.vs/
 *.user
+Windows/publish/
+Windows/Releases/
