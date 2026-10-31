@@ -68,7 +68,7 @@
                 </Button>
             </Grid>
 
-            <ListView x:Name="ServerList" Grid.Row="1" ItemsSource="{x:Bind Sidebar.Rows}" SelectionMode="Single"
+            <ListView x:Name="ServerList" Grid.Row="1" ItemsSource="{x:Bind Sidebar.Rows}" SelectionMode="Extended"
                       SelectionChanged="ServerList_SelectionChanged" ContextRequested="ServerList_ContextRequested"
                       CanDragItems="True" DragItemsStarting="ServerList_DragItemsStarting">
                 <ListView.ItemContainerStyle>

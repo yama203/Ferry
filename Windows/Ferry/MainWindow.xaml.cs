@@ -135,9 +135,24 @@ public sealed partial class MainWindow : Window
         if (Sidebar.FirstResult is { } server) OpenServer(server);
     }
 
+    /// <summary>サイドバーで選んでいる接続先（Ctrl・Shift で複数選べる）</summary>
+    private List<ServerConfig> SelectedServers =>
+        ServerList.SelectedItems.OfType<SidebarRow>().Select(r => r.Server).OfType<ServerConfig>().ToList();
+
     private void ServerList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_restoringSelection || ServerList.SelectedItem is not SidebarRow row) return;
+        if (_restoringSelection) return;
+        var selected = ServerList.SelectedItems.OfType<SidebarRow>().ToList();
+        if (selected.Count > 1)
+        {
+            // 複数選んでいる間は開かない。見出しは選ばない
+            _restoringSelection = true;
+            foreach (var header in e.AddedItems.OfType<SidebarRow>().Where(r => r.IsHeader).ToList())
+                ServerList.SelectedItems.Remove(header);
+            _restoringSelection = false;
+            return;
+        }
+        if (selected.FirstOrDefault() is not { } row) return;
         if (row.IsHeader)
         {
             // 見出しを押したらフォルダを開閉する（選択はしない）
@@ -148,17 +163,17 @@ public sealed partial class MainWindow : Window
         if (row.Server is { } server && server.Id != _currentServerId) OpenServer(server);
     }
 
+    /// <summary>選んでいる接続先をまとめて運ぶ（ID をカンマ区切りで渡す）</summary>
     private void ServerList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (e.Items.FirstOrDefault() is SidebarRow { Server: { } server })
-        {
-            e.Data.SetText(FerryJson.IdString(server.Id));
-            e.Data.RequestedOperation = DataPackageOperation.Move;
-        }
-        else
+        var servers = e.Items.OfType<SidebarRow>().Select(r => r.Server).OfType<ServerConfig>().ToList();
+        if (servers.Count == 0)
         {
             e.Cancel = true;
+            return;
         }
+        e.Data.SetText(string.Join(",", servers.Select(s => FerryJson.IdString(s.Id))));
+        e.Data.RequestedOperation = DataPackageOperation.Move;
     }
 
     private void Header_DragOver(object sender, DragEventArgs e)
@@ -174,32 +189,50 @@ public sealed partial class MainWindow : Window
     private async void Header_Drop(object sender, DragEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not SidebarRow { AcceptsDrop: true } row) return;
-        if (!Guid.TryParse(await e.DataView.GetTextAsync(), out var id)) return;
-        await MoveServerAsync(id, row.FolderId, row.IsShared);
+        var ids = (await e.DataView.GetTextAsync()).Split(',')
+            .Select(text => Guid.TryParse(text, out var id) ? id : (Guid?)null).OfType<Guid>().ToList();
+        if (ids.Count > 0) await MoveServersAsync(ids, row.FolderId, row.IsShared);
     }
 
-    /// <summary>フォルダへ移す。共有と自分の間をまたぐときは確認する</summary>
-    private async Task MoveServerAsync(Guid id, Guid? folderId, bool toShared)
+    /// <summary>フォルダへ移す（まとめても可）。共有と自分の間をまたぐものがあるときは、まとめて 1 回確認する</summary>
+    private async Task MoveServersAsync(IReadOnlyList<Guid> ids, Guid? folderId, bool toShared)
     {
         var store = AppServices.Store;
-        if (store.Server(id) is not { } server) return;
-        if (toShared && !store.IsShared(id)
-            && !await Dialogs.ConfirmAsync(XamlRootOrThrow, $"「{server.Name}」を会社で共有しますか？",
-                                           "共有フォルダに保存され、会社の全員の一覧に出ます。パスワードは共有されません。", "共有する"))
+        var servers = ids.Select(store.Server).OfType<ServerConfig>().ToList();
+        string What(IReadOnlyList<ServerConfig> list) => list.Count == 1 ? $"「{list[0].Name}」" : $"{list.Count} 件の接続先";
+
+        var toCompany = servers.Where(s => toShared && !store.IsShared(s.Id)).ToList();
+        if (toCompany.Count > 0)
+        {
+            var passwords = AppServices.Passwords.Shared?.State == PasswordVault.VaultState.Unlocked
+                ? "パスワードは会社のパスワードの同期に入ります。"
+                : "パスワードは共有されません（「設定」→「パスワード」で会社の同期を使うと共有できます）。";
+            if (!await Dialogs.ConfirmAsync(XamlRootOrThrow, $"{What(toCompany)}を会社で共有しますか？",
+                                            $"共有フォルダに保存され、会社の全員の一覧に出ます。{passwords}", "共有する"))
+                return;
+        }
+        var toPersonal = servers.Where(s => !toShared && store.IsShared(s.Id)).ToList();
+        if (toPersonal.Count > 0
+            && !await Dialogs.ConfirmAsync(XamlRootOrThrow, $"{What(toPersonal)}を自分だけの接続先にしますか？",
+                                           "会社の全員の一覧から消え、自分の一覧にだけ残ります。", "自分だけにする"))
             return;
-        if (!toShared && store.IsShared(id)
-            && !await Dialogs.ConfirmAsync(XamlRootOrThrow, $"「{server.Name}」を自分だけの接続先にしますか？",
-                                           "会社の全員の一覧から消え、この PC の一覧にだけ残ります。", "自分だけにする"))
-            return;
-        store.MoveServer(id, folderId, toShared);
+        foreach (var server in servers) store.MoveServer(server.Id, folderId, toShared);
     }
+
+    private Task MoveServerAsync(Guid id, Guid? folderId, bool toShared) => MoveServersAsync([id], folderId, toShared);
 
     private void ServerList_ContextRequested(UIElement sender, Microsoft.UI.Xaml.Input.ContextRequestedEventArgs e)
     {
         e.Handled = true;
         if ((e.OriginalSource as FrameworkElement)?.DataContext is not SidebarRow row) return;
         var menu = new MenuFlyout();
-        if (row.Server is { } server)
+        var selected = SelectedServers;
+        if (row.Server is { } clicked && selected.Count > 1 && selected.Any(s => s.Id == clicked.Id))
+        {
+            // 複数選んでいるうちの 1 つを右クリックしたら、選んでいるもの全部に効くメニュー
+            BuildMultipleServersMenu(menu, selected);
+        }
+        else if (row.Server is { } server)
         {
             BuildServerMenu(menu, server);
         }
@@ -250,22 +283,7 @@ public sealed partial class MainWindow : Window
             return Task.CompletedTask;
         });
 
-        var move = new MenuFlyoutSubItem { Text = "フォルダへ移動", Icon = new FontIcon { Glyph = "" } };
-        void AddMove(string title, Guid? folderId, bool shared)
-        {
-            var item = new MenuFlyoutItem { Text = title, IsEnabled = !(server.FolderId == folderId && shared == isShared) };
-            item.Click += async (_, _) => await MoveServerAsync(server.Id, folderId, shared);
-            move.Items.Add(item);
-        }
-        if (store.Shared.IsEnabled)
-        {
-            foreach (var folder in store.Shared.Folders) AddMove($"会社の共有 / {folder.Name}", folder.Id, true);
-            AddMove("会社の共有・フォルダなし", null, true);
-            move.Items.Add(new MenuFlyoutSeparator());
-        }
-        foreach (var folder in store.PersonalFolders) AddMove(folder.Name, folder.Id, false);
-        AddMove(store.Shared.IsEnabled ? "自分の接続先・フォルダなし" : "フォルダなし", null, false);
-        menu.Items.Add(move);
+        menu.Items.Add(MoveMenu([server]));
 
         if (store.Shared.IsEnabled)
         {
@@ -283,6 +301,61 @@ public sealed partial class MainWindow : Window
             if (!await Dialogs.ConfirmAsync(XamlRootOrThrow, $"「{server.Name}」を削除しますか？", message, "削除", destructive: true))
                 return;
             store.Delete(server.Id);
+        });
+    }
+
+    /// <summary>「フォルダへ移動」のサブメニュー（すでにそこにあるものだけなら選べない）</summary>
+    private MenuFlyoutSubItem MoveMenu(IReadOnlyList<ServerConfig> servers)
+    {
+        var store = AppServices.Store;
+        var move = new MenuFlyoutSubItem { Text = "フォルダへ移動", Icon = new FontIcon { Glyph = "" } };
+        void AddMove(string title, Guid? folderId, bool shared)
+        {
+            var item = new MenuFlyoutItem
+            {
+                Text = title,
+                IsEnabled = servers.Any(s => !(s.FolderId == folderId && store.IsShared(s.Id) == shared)),
+            };
+            item.Click += async (_, _) => await MoveServersAsync(servers.Select(s => s.Id).ToList(), folderId, shared);
+            move.Items.Add(item);
+        }
+        if (store.Shared.IsEnabled)
+        {
+            foreach (var folder in store.Shared.Folders) AddMove($"会社の共有 / {folder.Name}", folder.Id, true);
+            AddMove("会社の共有・フォルダなし", null, true);
+            move.Items.Add(new MenuFlyoutSeparator());
+        }
+        foreach (var folder in store.PersonalFolders) AddMove(folder.Name, folder.Id, false);
+        AddMove(store.Shared.IsEnabled ? "自分の接続先・フォルダなし" : "フォルダなし", null, false);
+        return move;
+    }
+
+    /// <summary>複数の接続先を選んでいるときの右クリックのメニュー</summary>
+    private void BuildMultipleServersMenu(MenuFlyout menu, IReadOnlyList<ServerConfig> servers)
+    {
+        var store = AppServices.Store;
+        var ids = servers.Select(s => s.Id).ToList();
+        menu.Items.Add(new MenuFlyoutItem { Text = $"{servers.Count} 件の接続先", IsEnabled = false });
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(MoveMenu(servers));
+        if (store.Shared.IsEnabled)
+        {
+            // 共有・自分のどちらかに揃える（フォルダは「フォルダなし」に入る）
+            if (servers.Any(s => !store.IsShared(s.Id)))
+                Add(menu, "会社で共有する", "", () => MoveServersAsync(ids.Where(id => !store.IsShared(id)).ToList(), null, true));
+            if (servers.Any(s => store.IsShared(s.Id)))
+                Add(menu, "自分だけの接続先にする", "", () => MoveServersAsync(ids.Where(store.IsShared).ToList(), null, false));
+        }
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Add(menu, $"{servers.Count} 件を削除…", "", async () =>
+        {
+            var sharedCount = servers.Count(s => store.IsShared(s.Id));
+            var message = sharedCount > 0
+                ? $"そのうち {sharedCount} 件は会社の共有の接続先で、全員の一覧から消えます。保存したパスワードも削除します。"
+                : "保存したパスワードも削除します。";
+            if (!await Dialogs.ConfirmAsync(XamlRootOrThrow, $"{servers.Count} 件の接続先を削除しますか？", message, "削除", destructive: true))
+                return;
+            foreach (var id in ids) store.Delete(id);
         });
     }
 

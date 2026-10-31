@@ -22,6 +22,12 @@ public sealed partial class SidebarRow : ObservableObject
     public bool IsExpanded { get; init; } = true;
     public ServerConfig? Server { get; init; }
 
+    /// <summary>表示が同じか（一覧を作り直すとき、同じ行はそのまま残してスクロール位置や選択を保つ）</summary>
+    public bool SameAs(SidebarRow other) =>
+        IsHeader == other.IsHeader && Title == other.Title && Subtitle == other.Subtitle && IsShared == other.IsShared
+        && FolderId == other.FolderId && IsFolder == other.IsFolder && AcceptsDrop == other.AcceptsDrop
+        && IsExpanded == other.IsExpanded && Equals(Server, other.Server);
+
     public string ChevronGlyph => IsExpanded ? "" : "";
     public string ServerGlyph => IsShared ? "" : "";
     public double ChevronOpacity => IsFolder ? 1 : 0;
@@ -105,9 +111,24 @@ public sealed partial class SidebarViewModel : ObservableObject
             rows.AddRange(Sorted(store.ServersInFolder(null, shared: false)).Select(s => ServerRow(s, false)));
         }
 
-        Rows.Clear();
-        foreach (var row in rows) Rows.Add(row);
+        ApplyRows(rows);
         StorageDescription = AppServices.StorageDescription;
+    }
+
+    /// <summary>
+    /// 変わった部分だけを入れ替える（全部消して作り直すと、フォルダを開閉するたびに一番上へスクロールしてしまう）。
+    /// 前後の同じ行はそのまま残し、間の違うところだけを差し替える。
+    /// </summary>
+    private void ApplyRows(List<SidebarRow> rows)
+    {
+        var prefix = 0;
+        while (prefix < Rows.Count && prefix < rows.Count && Rows[prefix].SameAs(rows[prefix])) prefix++;
+        var suffix = 0;
+        while (suffix < Rows.Count - prefix && suffix < rows.Count - prefix
+               && Rows[Rows.Count - 1 - suffix].SameAs(rows[rows.Count - 1 - suffix]))
+            suffix++;
+        for (var i = Rows.Count - suffix - 1; i >= prefix; i--) Rows.RemoveAt(i);
+        for (var i = prefix; i < rows.Count - suffix; i++) Rows.Insert(i, rows[i]);
     }
 
     private void AddFolder(List<SidebarRow> rows, ServerFolder folder, bool shared)
