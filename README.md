@@ -23,7 +23,7 @@ Apple シリコン（M1 以降）の Mac、macOS 15 以降で動く。Homebrew �
 
 ## Windows 版
 
-`Windows/` に作る予定。仕様は [docs/WINDOWS_PORT.md](docs/WINDOWS_PORT.md)。
+`Windows/` で作成中（C# / .NET 10）。今は画面に依存しない部分（`Ferry.Core`：接続先の保存・通信・同期の比較）とテストまで。仕様と進み具合は [docs/WINDOWS_PORT.md](docs/WINDOWS_PORT.md)。
 
 ## 開発
 
