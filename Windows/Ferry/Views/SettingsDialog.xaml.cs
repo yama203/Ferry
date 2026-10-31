@@ -9,16 +9,41 @@ public sealed partial class SettingsDialog : ContentDialog
 {
     private string? _sharedDirectory;
 
-    public SettingsDialog(XamlRoot root)
+    /// <summary>開いたときに選ぶタブ</summary>
+    public enum Tab { Shared, Passwords, Exclude, Editor, Notifications }
+
+    public SettingsDialog(XamlRoot root, Tab tab = Tab.Shared)
     {
         InitializeComponent();
         XamlRoot = root;
+        Tabs.SelectedIndex = (int)tab;
         _sharedDirectory = AppServices.Store.Shared.DirectoryPath;
         ExcludeBox.Text = string.Join("\r", AppServices.Store.ExcludeRules.Patterns);
         _editorPath = AppServices.Settings.EditorPath;
         NotifySwitch.IsOn = AppServices.Settings.NotifyOnComplete;
         UpdateShared();
         UpdateEditor();
+        RenderVaults();
+    }
+
+    // MARK: パスワードの同期
+
+    private void RenderVaults()
+    {
+        var store = AppServices.Store;
+        VaultsPanel.Children.Clear();
+        VaultsPanel.Children.Add(new VaultPanel(
+            "自分の Mac・Windows と同期",
+            "自分の接続先のパスワードを、マスターパスワードで暗号化して iCloud Drive に置きます（Mac 版の「パスワードの同期」と同じもの）。",
+            () => AppServices.Passwords.Personal,
+            () => store.PersonalServers.Select(s => s.Id),
+            "iCloud Drive が見つかりません。Windows 用 iCloud を入れて iCloud Drive を有効にすると使えます。"));
+        VaultsPanel.Children.Add(new VaultPanel(
+            "会社で同期",
+            "会社の共有の接続先のパスワードを、会社のマスターパスワードで暗号化して共有フォルダに置きます。会社のマスターパスワードを知っている人が使えます。",
+            () => AppServices.Passwords.Shared,
+            () => store.SharedServers.Select(s => s.Id),
+            "会社の共有フォルダを設定すると使えます（「会社の共有」のタブ）。"));
     }
 
     // MARK: エディタ
@@ -95,6 +120,7 @@ public sealed partial class SettingsDialog : ContentDialog
             }
             AppServices.Settings.SharedDirectory = _sharedDirectory;
             AppServices.Settings.Save();
+            AppServices.UpdateSharedVault();
         }
 
         AppServices.Settings.EditorPath = _editorPath;

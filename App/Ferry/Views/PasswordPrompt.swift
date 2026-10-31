@@ -59,10 +59,11 @@ struct PasswordPrompt: View {
                     .foregroundStyle(.secondary)
             }
 
-            // 他の Mac でパスワード同期を始めていて、この Mac ではまだ解除していない場合
-            if Passwords.vault?.state == .locked {
+            // 他の PC（共有の接続先は会社）でパスワード同期を始めていて、この Mac ではまだ解除していない場合
+            if Passwords.targetVault(for: session.server.id)?.state == .locked {
                 Divider().frame(width: 300).padding(.vertical, 6)
-                Label("他の Mac で同期したパスワードを使う", systemImage: "key.icloud")
+                Label(Passwords.isShared(session.server.id) ? "会社で同期したパスワードを使う" : "他の PC で同期したパスワードを使う",
+                      systemImage: "key.icloud")
                     .font(.headline)
                 HStack {
                     SecureField("マスターパスワード", text: $master)
@@ -84,7 +85,7 @@ struct PasswordPrompt: View {
     }
 
     private func unlockVault() {
-        guard let vault = Passwords.vault else { return }
+        guard let vault = Passwords.targetVault(for: session.server.id) else { return }
         do {
             try vault.unlock(masterPassword: master)
             unlockError = nil

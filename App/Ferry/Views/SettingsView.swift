@@ -8,8 +8,10 @@ struct SettingsView: View {
         TabView {
             SharedSettings()
                 .tabItem { Label("会社の共有", systemImage: "person.2") }
-            PasswordSyncSettings(vault: vault)
+            PasswordSyncSettings(kind: .personal, vault: vault)
                 .tabItem { Label("パスワード同期", systemImage: "key.icloud") }
+            SharedPasswordSettings()
+                .tabItem { Label("会社のパスワード", systemImage: "person.badge.key") }
             ExcludeSettings()
                 .tabItem { Label("除外", systemImage: "line.3.horizontal.decrease.circle") }
             EditorSettings()
@@ -137,8 +139,20 @@ private struct NotificationSettings: View {
     }
 }
 
-/// パスワードを iCloud Drive で同期する設定
+/// 会社の共有の接続先のパスワードを、共有フォルダで同期する設定（store.shared.passwordVault を見る）
+private struct SharedPasswordSettings: View {
+    @Environment(ServerStore.self) private var store
+
+    var body: some View {
+        PasswordSyncSettings(kind: .shared, vault: store.shared.passwordVault)
+    }
+}
+
+/// パスワードを同期する設定（自分: iCloud Drive、会社: 共有フォルダ）
 private struct PasswordSyncSettings: View {
+    enum Kind { case personal, shared }
+
+    let kind: Kind
     let vault: PasswordVault?
 
     @Environment(ServerStore.self) private var store
@@ -156,8 +170,10 @@ private struct PasswordSyncSettings: View {
                 case .locked: unlock(vault)
                 case .unlocked: status(vault)
                 }
-            } else {
+            } else if kind == .personal {
                 Label("iCloud Drive が使えないため、パスワードの同期はできません", systemImage: "icloud.slash")
+            } else {
+                Label("会社の共有フォルダを設定すると使えます（「会社の共有」のタブ）", systemImage: "person.2.slash")
             }
             if let message {
                 Text(message)
@@ -169,14 +185,27 @@ private struct PasswordSyncSettings: View {
         .padding()
     }
 
+    /// この保管庫に入れる接続先
+    private var serverIDs: [UUID] {
+        kind == .personal ? store.servers.map(\.id) : store.shared.servers.map(\.id)
+    }
+
     private func setup(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("接続先のパスワードを暗号化して iCloud Drive に保存し、他の Mac と同期します。")
-            Text("暗号化に使う「マスターパスワード」を決めてください。他の Mac では最初に 1 回だけ入力します。忘れると同期したパスワードは読み出せません（各 Mac に保存済みのパスワードは残ります）。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            SecureField("マスターパスワード", text: $master)
+            if kind == .personal {
+                Text("接続先のパスワードを暗号化して iCloud Drive に保存し、他の Mac や Windows 版と同期します。")
+                Text("暗号化に使う「マスターパスワード」を決めてください。他の PC では最初に 1 回だけ入力します。忘れると同期したパスワードは読み出せません（各 PC に保存済みのパスワードは残ります）。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("会社の共有の接続先のパスワードを暗号化して共有フォルダに保存し、会社の人と同期します（Windows 版とも同じ）。")
+                Text("暗号化に使う「会社のマスターパスワード」を決めて、会社の人に伝えてください。各自が最初に 1 回だけ入力します。会社のマスターパスワードを知っている人は、共有の接続先のパスワードをすべて使えます。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            SecureField(kind == .personal ? "マスターパスワード" : "会社のマスターパスワード", text: $master)
             SecureField("もう一度入力", text: $confirm)
             HStack {
                 Spacer()
@@ -185,7 +214,7 @@ private struct PasswordSyncSettings: View {
                     guard master == confirm else { return message = "2 つの入力が一致しません" }
                     // この Mac に保存してあるパスワードを最初の中身にする
                     var initial: [UUID: String] = [:]
-                    for server in store.servers {
+                    for server in store.servers where serverIDs.contains(server.id) {
                         if let password = Keychain.password(for: server.id) { initial[server.id] = password }
                     }
                     do {
@@ -205,7 +234,8 @@ private struct PasswordSyncSettings: View {
 
     private func unlock(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("他の Mac でパスワードの同期が設定されています", systemImage: "lock.icloud")
+            Label(kind == .personal ? "他の PC でパスワードの同期が設定されています" : "会社でパスワードの同期が設定されています",
+                  systemImage: "lock.icloud")
                 .font(.headline)
             Text("マスターパスワードを入力すると、この Mac でも同期したパスワードが使えるようになります。")
                 .font(.callout)
@@ -233,16 +263,16 @@ private struct PasswordSyncSettings: View {
 
     private func status(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("iCloud Drive で同期中", systemImage: "checkmark.icloud.fill")
+            Label(kind == .personal ? "iCloud Drive で同期中" : "共有フォルダで同期中", systemImage: "checkmark.icloud.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
-            Text("\(vault.count) 件のパスワードを同期しています。パスワードを保存・変更すると、他の Mac にも反映されます。")
+            Text("\(vault.count) 件のパスワードを同期しています。パスワードを保存・変更すると、\(kind == .personal ? "他の PC" : "会社の人の Ferry")にも反映されます。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("この Mac のパスワードを同期に追加") {
-                    let result = Passwords.addLocalPasswordsToVault(serverIDs: store.servers.map(\.id))
+                    let result = Passwords.addLocalPasswordsToVault(vault, serverIDs: serverIDs)
                     var text = "\(result.added) 件を追加しました。"
                     if !result.failures.isEmpty {
                         let detail = result.failures.map { "コード \($0.key)：\($0.value) 件" }.joined(separator: "、")
@@ -263,7 +293,9 @@ private struct PasswordSyncSettings: View {
         .confirmationDialog("パスワードの同期をやめますか？", isPresented: $confirmingDisable) {
             Button("同期をやめる", role: .destructive) { vault.disable() }
         } message: {
-            Text("すべての Mac で同期が止まります。iCloud Drive の暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。")
+            Text(kind == .personal
+                 ? "すべての PC で同期が止まります。iCloud Drive の暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。"
+                 : "会社の全員の同期が止まります。共有フォルダの暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。")
         }
     }
 }
@@ -279,7 +311,7 @@ private struct SharedSettings: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("パスワードは共有しません。それぞれが最初に接続するときに入力します。ローカルのフォルダやブックマークも PC ごとの設定です。")
+            Text("パスワードは「会社のパスワード」のタブで会社のマスターパスワードを決めると、暗号化して共有できます。決めない場合は、それぞれが最初に接続するときに入力します。ローカルのフォルダやブックマークは PC ごとの設定です。")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

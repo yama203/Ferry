@@ -142,9 +142,16 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
             <!-- 更新のお知らせ -->
-            <InfoBar x:Name="UpdateBar" Severity="Informational" Title="新しいバージョンがあります" IsOpen="False" Margin="12,0,12,8">
+            <InfoBar x:Name="UpdateBar" Grid.Row="0" VerticalAlignment="Top" Severity="Informational" Title="新しいバージョンがあります" IsOpen="False" Margin="12,0,12,8">
                 <InfoBar.ActionButton>
                     <Button Content="再起動して更新" Click="ApplyUpdate_Click" Style="{StaticResource AccentButtonStyle}" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <!-- パスワードの同期にマスターパスワードが必要 -->
+            <InfoBar x:Name="VaultBar" Grid.Row="0" Severity="Warning" Title="パスワードの同期" IsOpen="False" Margin="12,0,12,8"
+                     Message="他の PC で設定されたパスワードの同期があります。マスターパスワードを入力すると、この PC でも使えます。">
+                <InfoBar.ActionButton>
+                    <Button Content="設定を開く" Click="OpenPasswordSettings_Click" />
                 </InfoBar.ActionButton>
             </InfoBar>
             <ContentPresenter x:Name="SessionHost" Grid.Row="1" />

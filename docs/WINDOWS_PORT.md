@@ -8,7 +8,7 @@ Windows PC 上の Claude Code がこの文書に沿って作業する。
 - **使う人**: 会社の人（社内向け。一般公開はしない）。画面の言葉はすべて日本語。
 - **Mac 版はそのまま残す**。Windows 版は C# で別に作り、Mac 版と**同じ形式のファイル**で接続先を共有する。
 - **接続先**: 会社で共有する接続先（Dropbox の共有フォルダ）と、自分だけの接続先の両方を持てる。
-- **パスワード**: 共有しない。各自が自分の PC（Windows の資格情報マネージャー）に保存する。
+- **パスワード**: 各自の PC（Windows の資格情報マネージャー）に保存する。加えて、マスターパスワードで暗号化した保管庫で同期できる（自分の Mac・Windows の間は iCloud Drive、会社の共有の接続先は共有フォルダ。下の「パスワード」）。
 - コードのコメント・コミットメッセージ・画面の文言は日本語（Mac 版と同じ）。
 
 ## 技術
@@ -106,12 +106,11 @@ Windows/
 - ブックマーク: 接続先ごとに「左のフォルダ + 右のフォルダ」の組み合わせを保存。選ぶと両方のペインがそこを開く。「接続時に開く」を設定できる。
 - 除外ルールの既定: `.git` `.svn` `.hg` `node_modules` `.DS_Store` `._*` `Thumbs.db` `desktop.ini` `.idea` `.sass-cache` `__pycache__` `*.swp` `*~` `*.ferrypart`（`*` と `?` が使える。名前だけで判定）。
 - 読み込み: Windows では **FileZilla**（`%APPDATA%\FileZilla\sitemanager.xml`）と **WinSCP** からの読み込みがあると便利（Mac 版の Transmit からの読み込みの代わり）。
-- 設定画面のタブ: 会社の共有、除外、エディタ、通知。
+- 設定画面のタブ: 会社の共有、パスワード（自分の同期・会社の同期）、除外、エディタ、通知。
 
 ### Windows 版では作らないもの
 
 - Finder のタグ（Windows に無い）。
-- iCloud でのパスワード同期（パスワードは各自の PC に保存する方針のため）。
 
 ## データの形式（Mac 版と共通）
 
@@ -123,6 +122,8 @@ Windows/
 <共有フォルダ>/ferry-shared.json      {"version":1}  … 目印
 <共有フォルダ>/folders.json           [{"id": "...", "name": "お客様サーバー"}]
 <共有フォルダ>/servers/<ID>.json      接続先 1 件（下の形式）
+<共有フォルダ>/passwords.vault        共有の接続先のパスワード（会社のマスターパスワードで暗号化。下の「パスワード」）
+<共有フォルダ>/App/Windows/           Windows 版のインストーラーと更新（release.ps1 が置く）
 ```
 
 - 接続先 1 件につき 1 ファイルにしているのは、複数人が同時に編集しても衝突しにくくするため。
@@ -154,7 +155,11 @@ Windows/
 
 ### 自分の接続先
 
-`%APPDATA%\Ferry\servers.json`（Mac 版は iCloud Drive の `Ferry/servers.json`）:
+Mac 版は iCloud Drive の `Ferry/servers.json`。Windows 版は、iCloud Drive（Windows 用 iCloud の `%USERPROFILE%\iCloudDrive`）があれば **Mac 版と同じ `iCloudDrive\Ferry\servers.json` を使う**（自分の Mac と Windows で同期）。無ければ `%APPDATA%\Ferry\servers.json`。iCloud Drive を使い始めたときに `%APPDATA%` の分があれば一度だけ取り込む。
+
+Mac 版とファイルを共有するとき、PC ごとの設定（`localPath` `privateKeyPath` `bookmarks` `startBookmarkID`、`sharedOverrides`）は Mac のパスなので、Windows 版は**ファイルの値を書き換えずに残し**、この PC の分を `%LOCALAPPDATA%\Ferry\overrides.json` に持つ（`{"personal": {ID: 上書き}, "shared": {ID: 上書き}}`）。Mac で作ったブックマークは Windows には出ず、Windows で作ったものは Mac には出ない。
+
+```
 
 ```json
 {
@@ -168,7 +173,29 @@ Windows/
 
 ### パスワード
 
-Windows の資格情報マネージャーに、ターゲット名 `Ferry:<接続先の ID>` で保存する。共有の接続先も ID で引くので、共有に移しても保存済みのパスワードはそのまま使える。
+各 PC には、Windows は資格情報マネージャー（ターゲット名 `Ferry:<接続先の ID>`）、Mac はキーチェーンに保存する。共有の接続先も ID で引くので、共有に移しても保存済みのパスワードはそのまま使える。
+
+加えて、マスターパスワードで暗号化した**保管庫**（`passwords.vault`）で同期できる。Mac・Windows で同じ形式。
+
+| 保管庫 | 場所 | 入るもの | 鍵の名前（PC に保存） |
+|---|---|---|---|
+| 自分 | iCloud Drive の `Ferry/passwords.vault` | 自分の接続先のパスワード | `vault-key` |
+| 会社 | `<共有フォルダ>/passwords.vault` | 共有の接続先のパスワード（会社のマスターパスワードを知っている人が使える） | `shared-vault-key` |
+
+- 探す順: 共有の接続先は 会社 → 自分 → この PC、自分の接続先は 自分 → この PC。保存は この PC と、該当する保管庫（共有なら会社、自分なら自分）。この PC にだけあるパスワードは、使ったときに保管庫へ追加する。
+- 接続先を共有 ⇄ 自分の間で移したら、パスワードも移った先の保管庫へ入れ直す。
+- マスターパスワードから作った鍵は各 PC（キーチェーン・資格情報マネージャー `Ferry:<鍵の名前>`）に保存するので、入力は PC ごとに 1 回だけ。
+
+形式:
+
+```
+{"version":1, "salt":"<base64 16 バイト>", "iterations":600000, "sealed":"<base64>"}
+鍵     = PBKDF2-HMAC-SHA256（マスターパスワードの UTF-8、salt、iterations 回、32 バイト）
+sealed = AES-256-GCM の combined 形式（nonce 12 バイト + 暗号文 + タグ 16 バイト）
+中身   = {"<接続先の ID（大文字）>": "<パスワード>"} の JSON
+```
+
+書くときは、他の PC の変更を取りこぼさないよう最新を読んでから、同じ salt で書き直す。
 
 ## 配布と更新
 
@@ -203,6 +230,7 @@ Windows の資格情報マネージャーに、ターゲット名 `Ferry:<接続
 - [x] 4. プレビュー（スペースで開閉・↑↓で次、画像・テキスト・HTML/PDF/SVG、サーバーのファイルは一時フォルダへ、5MB までは 0.25 秒止まったら先読み）、エディタで開いて自動アップロード（`Ferry.Core/EditWatcher.cs`、ツールバーの「編集中」）、同期（方向の切り替え・ミラー・タイルで絞り込み・項目ごとのチェック・完了の通知）、ブックマーク（ツールバーとサイドバーの右クリック）
 - [x] 5. 設定画面のエディタ・通知のタブ、FileZilla / WinSCP からの読み込み（`Ferry.Core/Import/`、サンプルファイルでテスト）。FileZilla は入れ子のフォルダを「親 / 子」にまとめ、base64 のパスワードは読んで保存する（マスターパスワードで暗号化されたものは読めない）。WinSCP はレジストリ → WinSCP.ini の順に探し、パスワードは読まない
 - [x] 6. Velopack での配布と自動更新、`release.ps1`。この PC にインストール → 0.1.2 への差分の自動更新 → 再起動まで確認済み（共有フォルダ・GitHub への公開はまだ一度もしていない）
+- [x] 自分の Mac・Windows の同期（iCloud Drive の servers.json と passwords.vault）、会社のパスワードの同期（共有フォルダの passwords.vault。Mac 版も対応。**Mac 版はまだビルドして確かめていない**）
 - [ ] 残り: 列幅を覚える、共有フォルダ・エクスプローラーとのドラッグ・ミラー・エディタで開くの実地での確認
 
 ### 配布（release.ps1）

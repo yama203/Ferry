@@ -173,7 +173,8 @@ final class ServerStore {
             upsert(server)
             return
         }
-        // 共有 ⇄ 自分の間を移す（ID は変えないので、保存済みのパスワードもそのまま使える）
+        // 共有 ⇄ 自分の間を移す（ID は変えないので、キーチェーンに保存済みのパスワードもそのまま使える）
+        let password = Passwords.password(for: id)
         if toShared {
             personalServers.removeAll { $0.id == id }
             shared.save(server)
@@ -184,6 +185,10 @@ final class ServerStore {
             personalServers.append(server)
         }
         save()
+        // 同期しているパスワードは、移った先の保管庫（会社・自分）に入れ直す
+        if let password {
+            Passwords.setPassword(password, for: id)
+        }
     }
 
     private func setOverride(_ override: SharedServerOverride, for id: UUID) {

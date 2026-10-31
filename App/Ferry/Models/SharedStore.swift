@@ -16,6 +16,8 @@ final class SharedStore {
     private(set) var servers: [ServerConfig] = []
     private(set) var folders: [ServerFolder] = []
     private(set) var directory: URL?
+    /// 会社のパスワードの保管庫（<共有フォルダ>/passwords.vault。会社のマスターパスワードで暗号化）
+    private(set) var passwordVault: PasswordVault?
 
     @ObservationIgnored private var presenter: DirectoryPresenter?
     private static let directoryKey = "sharedDirectory"
@@ -38,6 +40,9 @@ final class SharedStore {
         if remember {
             UserDefaults.standard.set(url?.path, forKey: Self.directoryKey)
         }
+        passwordVault?.close()
+        passwordVault = url.map { PasswordVault(directory: $0, keyAccount: "shared-vault-key") }
+        Passwords.sharedVault = passwordVault
         guard let url else {
             servers = []
             folders = []

@@ -9,7 +9,7 @@
     DefaultButton="Primary"
     PrimaryButtonClick="Save_Click">
 
-    <Pivot Width="480" Height="420">
+    <Pivot x:Name="Tabs" Width="480" Height="420">
         <PivotItem Header="会社の共有">
             <StackPanel Spacing="12" Margin="0,12,0,0">
                 <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -22,6 +22,11 @@
                 <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            Text="共有をやめても、共有フォルダのファイルは消えません。" />
             </StackPanel>
+        </PivotItem>
+        <PivotItem Header="パスワード">
+            <ScrollViewer Margin="0,12,0,0">
+                <StackPanel x:Name="VaultsPanel" Spacing="24" Padding="0,0,12,0" />
+            </ScrollViewer>
         </PivotItem>
         <PivotItem Header="除外">
             <StackPanel Spacing="8" Margin="0,12,0,0">

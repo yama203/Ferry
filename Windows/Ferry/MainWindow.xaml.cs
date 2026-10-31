@@ -34,6 +34,8 @@ public sealed partial class MainWindow : Window
 
         Sidebar.Rebuild();
         AppServices.Store.Changed += (_, _) => AppServices.OnUi(OnStoreChanged);
+        AppServices.VaultsChanged += (_, _) => AppServices.OnUi(UpdateVaultBar);
+        UpdateVaultBar();
         _ = CheckForUpdateAsync();
 
         // 前回開いていた接続先を開く
@@ -310,6 +312,26 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(item);
     }
 
+    // MARK: パスワードの同期
+
+    private void UpdateVaultBar()
+    {
+        // 更新のお知らせと同じ場所なので、更新のお知らせが出ていればそちらを優先する
+        VaultBar.IsOpen = AppServices.NeedsMasterPassword && !UpdateBar.IsOpen;
+    }
+
+    private async void OpenPasswordSettings_Click(object sender, RoutedEventArgs e)
+    {
+        await Dialogs.ShowAsync(new SettingsDialog(XamlRootOrThrow, SettingsDialog.Tab.Passwords));
+        UpdateVaultBar();
+        // マスターパスワードを入れたら、パスワード待ちの接続先をつなぎ直す
+        foreach (var (viewModel, _) in _sessions.Values)
+        {
+            if (viewModel.Status == SessionStatus.NeedsPassword && AppServices.Passwords.GetPassword(viewModel.Server.Id) is { } password)
+                await viewModel.ConnectWithPasswordAsync(password, save: false);
+        }
+    }
+
     // MARK: 自動更新
 
     private async Task CheckForUpdateAsync()
@@ -317,6 +339,7 @@ public sealed partial class MainWindow : Window
         if (await Updater.CheckAndDownloadAsync() is not { } version) return;
         UpdateBar.Message = $"Ferry {version} をダウンロードしました。再起動すると更新されます（次に起動したときにも自動で更新されます）。";
         UpdateBar.IsOpen = true;
+        UpdateVaultBar();
     }
 
     private async void ApplyUpdate_Click(object sender, RoutedEventArgs e)

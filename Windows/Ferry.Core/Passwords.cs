@@ -12,18 +12,35 @@ public interface IPasswordStore
     void SetPassword(Guid serverId, string? password);
 }
 
+/// <summary>名前を付けて秘密の値を保存する場所（保管庫の鍵など。テストでは差し替える）</summary>
+public interface ISecretStore
+{
+    string? GetSecret(string name);
+    /// <summary>null で削除</summary>
+    void SetSecret(string name, string? value);
+}
+
 /// <summary>
 /// Windows の資格情報マネージャーに、ターゲット名 "Ferry:&lt;接続先の ID&gt;" で保存する。
 /// 共有の接続先も ID で引くので、共有に移しても保存済みのパスワードはそのまま使える。
+/// 保管庫の鍵などは "Ferry:&lt;名前&gt;" で保存する。
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class CredentialPasswordStore : IPasswordStore
+public sealed class CredentialPasswordStore : IPasswordStore, ISecretStore
 {
     public static string TargetName(Guid serverId) => "Ferry:" + FerryJson.IdString(serverId);
 
-    public string? GetPassword(Guid serverId)
+    public string? GetPassword(Guid serverId) => Read(TargetName(serverId));
+
+    public void SetPassword(Guid serverId, string? password) => Write(TargetName(serverId), password, "Ferry の接続先のパスワード");
+
+    public string? GetSecret(string name) => Read("Ferry:" + name);
+
+    public void SetSecret(string name, string? value) => Write("Ferry:" + name, value, "Ferry のパスワードの同期の鍵");
+
+    private static string? Read(string target)
     {
-        if (!CredRead(TargetName(serverId), CredTypeGeneric, 0, out var pointer)) return null;
+        if (!CredRead(target, CredTypeGeneric, 0, out var pointer)) return null;
         try
         {
             var credential = Marshal.PtrToStructure<Credential>(pointer);
@@ -36,9 +53,8 @@ public sealed class CredentialPasswordStore : IPasswordStore
         }
     }
 
-    public void SetPassword(Guid serverId, string? password)
+    private static void Write(string target, string? password, string comment)
     {
-        var target = TargetName(serverId);
         if (password is null)
         {
             CredDelete(target, CredTypeGeneric, 0);
@@ -57,7 +73,7 @@ public sealed class CredentialPasswordStore : IPasswordStore
                 CredentialBlob = blobPointer,
                 Persist = CredPersistLocalMachine,
                 UserName = "Ferry",
-                Comment = "Ferry の接続先のパスワード",
+                Comment = comment,
             };
             if (!CredWrite(ref credential, 0))
             {

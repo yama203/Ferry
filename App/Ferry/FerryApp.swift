@@ -14,6 +14,8 @@ struct FerryApp: App {
         // パスワードの同期は iCloud Drive が使える場合だけ
         let vault = store.isICloud ? PasswordVault(directory: store.fileURL.deletingLastPathComponent()) : nil
         Passwords.vault = vault
+        // 共有の接続先のパスワードは会社の保管庫（store.shared.passwordVault）に入れる
+        Passwords.isShared = { [weak store] id in store?.isShared(id) ?? false }
         _vault = State(initialValue: vault)
         Notifier.setUp()
         // 同梱したルート証明書を使う（Homebrew の無い Mac でも FTPS の証明書を検証できるように）
