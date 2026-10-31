@@ -202,7 +202,9 @@ struct SessionView: View {
 
     @ViewBuilder private var remotePane: some View {
         switch session.status {
-        case .idle, .connecting where session.remote.entries.isEmpty:
+        // 接続し直しているあいだは、前の一覧を出したままにする
+        case .idle,
+             .connecting where session.remote.entries.isEmpty:
             ProgressView("\(session.server.host) に接続中…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .untrustedCertificate(let message):
