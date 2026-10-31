@@ -129,6 +129,9 @@ public final class RemoteClient: @unchecked Sendable {
                 handle.set(CURLOPT_UPLOAD, true)
                 handle.set(CURLOPT_INFILESIZE_LARGE, offset: curl_off_t(size))
                 handle.set(CURLOPT_FTP_CREATE_MISSING_DIRS, Int(CURLFTP_CREATE_DIR_RETRY))
+                // フルパスで 1 回だけ CWD すると、無いフォルダの MKD もフルパスで 1 回しか送らず、
+                // 2 段以上の新しいフォルダを作れない。アップロードは階層ごとに CWD する
+                handle.set(CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_MULTICWD)
                 handle.set(CURLOPT_NEW_FILE_PERMS, 0o644)
                 handle.set(CURLOPT_NEW_DIRECTORY_PERMS, 0o755)
                 let quote = self.attach(context, to: handle, isUpload: true)
