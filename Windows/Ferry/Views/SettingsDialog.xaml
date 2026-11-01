@@ -9,55 +9,110 @@
     DefaultButton="Primary"
     PrimaryButtonClick="Save_Click">
 
-    <Pivot x:Name="Tabs" Width="480" Height="420">
-        <PivotItem Header="会社の共有">
-            <StackPanel Spacing="12" Margin="0,12,0,0">
-                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="Dropbox などの共有フォルダに接続先を置くと、会社の人と同じ一覧を使えます（Mac 版と同じ形式）。パスワードは共有せず、各自の PC に保存します。" />
-                <TextBlock x:Name="SharedPathText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="共有フォルダを選択…" Click="ChooseShared_Click" />
-                    <Button x:Name="StopSharingButton" Content="共有をやめる" Click="StopSharing_Click" />
-                </StackPanel>
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="共有をやめても、共有フォルダのファイルは消えません。" />
+    <ContentDialog.Resources>
+        <x:Double x:Key="ContentDialogMaxWidth">760</x:Double>
+    </ContentDialog.Resources>
+
+    <!-- 左に縦のタブ（横に並べると幅に入りきらず、横にスクロールしないと出てこなかった）、右に中身 -->
+    <Grid Width="660" Height="440" ColumnSpacing="16">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="150" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <ListView x:Name="Tabs" SelectionMode="Single" SelectionChanged="Tabs_SelectionChanged" Padding="0">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                    <Setter Property="MinHeight" Value="36" />
+                    <Setter Property="Padding" Value="10,0" />
+                </Style>
+            </ListView.ItemContainerStyle>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE716;" FontSize="16" />
+                <TextBlock Text="会社の共有" VerticalAlignment="Center" />
             </StackPanel>
-        </PivotItem>
-        <PivotItem Header="パスワード">
-            <ScrollViewer Margin="0,12,0,0">
-                <StackPanel x:Name="VaultsPanel" Spacing="24" Padding="0,0,12,0" />
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE72E;" FontSize="16" />
+                <TextBlock Text="パスワード" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE71C;" FontSize="16" />
+                <TextBlock Text="除外" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE70F;" FontSize="16" />
+                <TextBlock Text="エディタ" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xEA8F;" FontSize="16" />
+                <TextBlock Text="通知" VerticalAlignment="Center" />
+            </StackPanel>
+        </ListView>
+
+        <Grid Grid.Column="1">
+            <!-- 会社の共有 -->
+            <ScrollViewer x:Name="SharedPage">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+                    <TextBlock Text="会社の共有" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="Dropbox などの共有フォルダに接続先を置くと、会社の人と同じ一覧を使えます（Mac 版と同じ形式）。パスワードは「パスワード」で会社のマスターパスワードを決めると、暗号化して共有できます。" />
+                    <TextBlock x:Name="SharedPathText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="共有フォルダを選択…" Click="ChooseShared_Click" />
+                        <Button x:Name="StopSharingButton" Content="共有をやめる" Click="StopSharing_Click" />
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="共有をやめても、共有フォルダのファイルは消えません。" />
+                </StackPanel>
             </ScrollViewer>
-        </PivotItem>
-        <PivotItem Header="除外">
-            <StackPanel Spacing="8" Margin="0,12,0,0">
-                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="フォルダを転送・同期するときに含めないファイル名（1 行に 1 つ。* と ? が使えます）。直接選んだ項目には適用しません。" />
-                <TextBox x:Name="ExcludeBox" AcceptsReturn="True" Height="260" FontFamily="Consolas" TextWrapping="NoWrap"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
-                <HyperlinkButton Content="既定に戻す" Click="ResetExclude_Click" Padding="0" />
-            </StackPanel>
-        </PivotItem>
-        <PivotItem Header="エディタ">
-            <StackPanel Spacing="12" Margin="0,12,0,0">
-                <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="サーバーのファイルを右クリックの「エディタで開く」で開くアプリ。保存するたびにサーバーへアップロードします。" />
-                <TextBlock x:Name="EditorNameText" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                <TextBlock x:Name="EditorPathText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Content="エディタを選択…" Click="ChooseEditor_Click" />
-                    <Button x:Name="ResetEditorButton" Content="VS Code に戻す" Click="ResetEditor_Click" />
+
+            <!-- パスワード -->
+            <ScrollViewer x:Name="PasswordsPage" Visibility="Collapsed">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+                    <TextBlock Text="パスワードの同期" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <StackPanel x:Name="VaultsPanel" Spacing="24" />
                 </StackPanel>
-            </StackPanel>
-        </PivotItem>
-        <PivotItem Header="通知">
-            <StackPanel Spacing="12" Margin="0,12,0,0">
-                <ToggleSwitch x:Name="NotifySwitch" Header="転送・同期が終わったら通知する"
-                              OnContent="通知する" OffContent="通知しない" />
-                <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           Text="1 回の操作で始めた転送が全部終わったときに、まとめて 1 回通知します。エディタの保存による自動アップロードでは通知しません。" />
-                <HyperlinkButton Content="通知を試す" Click="TestNotification_Click" Padding="0" />
-            </StackPanel>
-        </PivotItem>
-    </Pivot>
+            </ScrollViewer>
+
+            <!-- 除外 -->
+            <ScrollViewer x:Name="ExcludePage" Visibility="Collapsed">
+                <StackPanel Spacing="8" Padding="0,0,12,0">
+                    <TextBlock Text="除外" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="フォルダを転送・同期するときに含めないファイル名（1 行に 1 つ。* と ? が使えます）。直接選んだ項目には適用しません。" />
+                    <TextBox x:Name="ExcludeBox" AcceptsReturn="True" Height="260" FontFamily="Consolas" TextWrapping="NoWrap"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                    <HyperlinkButton Content="既定に戻す" Click="ResetExclude_Click" Padding="0" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- エディタ -->
+            <ScrollViewer x:Name="EditorPage" Visibility="Collapsed">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+                    <TextBlock Text="エディタ" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="サーバーのファイルを右クリックの「エディタで開く」で開くアプリ。保存するたびにサーバーへアップロードします。" />
+                    <TextBlock x:Name="EditorNameText" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock x:Name="EditorPathText" FontSize="12" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="エディタを選択…" Click="ChooseEditor_Click" />
+                        <Button x:Name="ResetEditorButton" Content="VS Code に戻す" Click="ResetEditor_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 通知 -->
+            <ScrollViewer x:Name="NotificationsPage" Visibility="Collapsed">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+                    <TextBlock Text="通知" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <ToggleSwitch x:Name="NotifySwitch" Header="転送・同期が終わったら通知する"
+                                  OnContent="通知する" OffContent="通知しない" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="1 回の操作で始めた転送が全部終わったときに、まとめて 1 回通知します。エディタの保存による自動アップロードでは通知しません。" />
+                    <HyperlinkButton Content="通知を試す" Click="TestNotification_Click" Padding="0" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Grid>
 </ContentDialog>

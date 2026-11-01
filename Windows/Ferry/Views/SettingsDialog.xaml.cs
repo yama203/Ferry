@@ -26,6 +26,14 @@ public sealed partial class SettingsDialog : ContentDialog
         RenderVaults();
     }
 
+    /// <summary>左のタブを選んだら、右の中身を切り替える（並びは Tab の順）</summary>
+    private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        UIElement[] pages = [SharedPage, PasswordsPage, ExcludePage, EditorPage, NotificationsPage];
+        for (var i = 0; i < pages.Length; i++)
+            pages[i].Visibility = i == Tabs.SelectedIndex ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     // MARK: パスワードの同期
 
     private void RenderVaults()
