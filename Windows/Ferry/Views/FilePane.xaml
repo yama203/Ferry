@@ -16,7 +16,7 @@
                     <ColumnDefinition Width="130" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="15" Foreground="{ThemeResource FerryBlueBrush}" />
+                    <Image Source="{x:Bind Icon}" Width="18" Height="18" />
                     <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <TextBlock Grid.Column="1" Text="{x:Bind SizeText}" HorizontalAlignment="Right" Margin="0,0,12,0"
@@ -35,7 +35,7 @@
                     <ColumnDefinition Width="84" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                    <FontIcon Glyph="{x:Bind Glyph}" FontSize="15" Foreground="{ThemeResource FerryBlueBrush}" />
+                    <Image Source="{x:Bind Icon}" Width="18" Height="18" />
                     <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
                 <TextBlock Grid.Column="1" Text="{x:Bind SizeText}" HorizontalAlignment="Right" Margin="0,0,12,0"

@@ -19,9 +19,12 @@ public sealed class FileEntry
     /// <summary>"rwxr-xr-x" 形式（サーバー側のみ）</summary>
     public string? Permissions { get; init; }
     public bool IsHidden { get; init; }
+    /// <summary>サーバー側の項目（アイコンは拡張子から決める）</summary>
+    public bool IsRemote { get; init; }
 
     public static FileEntry FromRemote(RemoteItem item) => new()
     {
+        IsRemote = true,
         Name = item.Name,
         Path = item.Path,
         IsDirectory = item.IsDirectory,
@@ -51,6 +54,9 @@ public sealed class FileEntry
 
     public string Glyph =>
         IsDrive ? "\uEDA2" : IsDirectory ? "\uE8B7" : IsSymlink ? "\uE71B" : "\uE8A5";
+
+    /// <summary>\u30A8\u30AF\u30B9\u30D7\u30ED\u30FC\u30E9\u30FC\u3068\u540C\u3058\u30A2\u30A4\u30B3\u30F3</summary>
+    public Microsoft.UI.Xaml.Media.ImageSource? Icon => ShellIcons.For(this, IsRemote);
 
     public string SizeText => IsDirectory || Size is null ? "--" : FormatSize(Size.Value);
 
