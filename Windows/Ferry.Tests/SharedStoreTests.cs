@@ -106,6 +106,40 @@ public class SharedStoreTests
     }
 
     [Fact]
+    public void 自分だけの接続先にしたり削除したりすると会社の保管庫から消える()
+    {
+        using var temp = new TempDirectory();
+        Directory.CreateDirectory(temp.Combine("me"));
+        Directory.CreateDirectory(temp.Combine("Dropbox", "Ferry"));
+        var secrets = new MemorySecretStore();
+        using var personal = new PasswordVault(temp.Combine("me", "passwords.vault"), secrets, "vault-key", watch: false);
+        using var company = new PasswordVault(temp.Combine("Dropbox", "Ferry", "passwords.vault"), secrets, "shared-vault-key", watch: false);
+        personal.Enable("自分", new Dictionary<Guid, string>());
+        company.Enable("会社", new Dictionary<Guid, string>());
+        var passwords = new PasswordService(new MemoryPasswordStore()) { Personal = personal, Shared = company };
+        using var store = new ServerStore(temp.Combine("me", "servers.json"), passwords);
+        store.Shared.SetDirectory(temp.Combine("Dropbox", "Ferry"), watch: false);
+        passwords.IsShared = store.IsShared;
+
+        var server = new ServerConfig { Name = "移す", Host = "h", Username = "u" };
+        store.Upsert(server, shared: true);
+        passwords.SetPassword(server.Id, "secret");
+        Assert.True(company.Contains(server.Id));
+
+        store.MoveServer(server.Id, null, toShared: false);
+        Assert.False(company.Contains(server.Id));
+        Assert.Equal("secret", personal.GetPassword(server.Id));
+
+        store.MoveServer(server.Id, null, toShared: true);
+        Assert.False(personal.Contains(server.Id));
+        Assert.Equal("secret", company.GetPassword(server.Id));
+
+        store.Delete(server.Id);
+        Assert.False(company.Contains(server.Id));
+        Assert.Null(passwords.GetPassword(server.Id));
+    }
+
+    [Fact]
     public void 削除するとパスワードも消え共有フォルダのファイルも消える()
     {
         var (temp, store, passwords) = MakeStore();

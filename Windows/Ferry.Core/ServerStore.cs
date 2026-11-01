@@ -292,6 +292,8 @@ public sealed class ServerStore : IDisposable
     /// <summary>共有の接続先を消すと、会社の全員の一覧から消える</summary>
     public void Delete(Guid id)
     {
+        // 共有の一覧から消す前に消す（後だと自分の保管庫が対象になり、会社の保管庫に残る）
+        _passwords?.SetPassword(id, null);
         if (IsShared(id))
         {
             Shared.Delete(id);
@@ -301,7 +303,6 @@ public sealed class ServerStore : IDisposable
         {
             RemovePersonal(id);
         }
-        _passwords?.SetPassword(id, null);
         Save();
     }
 
@@ -330,6 +331,8 @@ public sealed class ServerStore : IDisposable
         }
         // 共有 ⇄ 自分の間を移す（ID は変えないので、この PC に保存済みのパスワードもそのまま使える）
         var password = _passwords?.GetPassword(id);
+        // 移す前の保管庫から消す（自分だけの接続先にしたのに、会社の保管庫に残らないように）
+        _passwords?.SetPassword(id, null);
         if (toShared)
         {
             RemovePersonal(id);

@@ -155,13 +155,14 @@ final class ServerStore {
 
     /// 共有の接続先を消すと、会社の全員の一覧から消える
     func delete(_ id: UUID) {
+        // 共有の一覧から消す前に消す（後だと自分の保管庫が対象になり、会社の保管庫に残る）
+        Passwords.setPassword(nil, for: id)
         if isShared(id) {
             shared.delete(id)
             sharedOverrides[id.uuidString] = nil
         } else {
             personalServers.removeAll { $0.id == id }
         }
-        Passwords.setPassword(nil, for: id)
         save()
     }
 
@@ -174,7 +175,10 @@ final class ServerStore {
             return
         }
         // 共有 ⇄ 自分の間を移す（ID は変えないので、キーチェーンに保存済みのパスワードもそのまま使える）
-        let password = Passwords.password(for: id)
+        // 移す前の保管庫から消す（自分だけの接続先にしたのに、会社の保管庫に残らないように）
+        // password(for:) は後で元の保管庫へ追加することがあるので使わない
+        let password = Passwords.storedPassword(for: id)
+        Passwords.setPassword(nil, for: id)
         if toShared {
             personalServers.removeAll { $0.id == id }
             shared.save(server)
