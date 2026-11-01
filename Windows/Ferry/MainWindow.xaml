@@ -19,7 +19,7 @@
         <!-- タイトルバー（Mica を上まで敷く） -->
         <Grid x:Name="AppTitleBar" Grid.ColumnSpan="2" Padding="16,0,0,0">
             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE709;" FontSize="14" Foreground="{ThemeResource FerryBlueBrush}" />
+                <Image Source="ms-appx:///Assets/Ferry.png" Width="16" Height="16" />
                 <TextBlock Text="Ferry" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
             </StackPanel>
         </Grid>
@@ -117,20 +117,26 @@
             <TextBlock Grid.Row="1" Text="見つかりません" HorizontalAlignment="Center" Margin="0,80,0,0"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="{x:Bind Sidebar.IsSearchEmpty, Mode=OneWay}" />
 
-            <!-- Ferry のマークと保存場所 -->
-            <Grid Grid.Row="2" Padding="8,6" ColumnSpacing="8">
+            <!-- Ferry のマークと、同期の状態（アイコンだけ。詳しいことはマウスを乗せると出る。押すと設定を開く） -->
+            <Grid Grid.Row="2" Padding="10,6,4,2" ColumnSpacing="6" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Border Width="28" Height="28" CornerRadius="6" Background="{ThemeResource FerryBlueBrush}">
-                    <FontIcon Glyph="&#xE709;" FontSize="14" Foreground="White" />
-                </Border>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock x:Name="VersionText" Text="Ferry" FontWeight="SemiBold" FontSize="12" />
-                    <TextBlock Text="{x:Bind Sidebar.StorageDescription, Mode=OneWay}" FontSize="11" TextTrimming="CharacterEllipsis"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               ToolTipService.ToolTip="{x:Bind Sidebar.StorageDescription, Mode=OneWay}" />
+                <Image Source="ms-appx:///Assets/Ferry.png" Width="20" Height="20" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1" Text="Ferry" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="2" x:Name="VersionText" FontSize="11" VerticalAlignment="Center" Margin="0,2,0,0"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <StackPanel Grid.Column="4" Orientation="Horizontal">
+                    <Button x:Name="ICloudStatus" Style="{StaticResource PaneButtonStyle}" Click="ICloudStatus_Click" Visibility="Collapsed">
+                        <FontIcon x:Name="ICloudIcon" Glyph="&#xE753;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Button>
+                    <Button x:Name="SharedStatus" Style="{StaticResource PaneButtonStyle}" Click="SharedStatus_Click" Visibility="Collapsed">
+                        <FontIcon x:Name="SharedIcon" Glyph="&#xE716;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Button>
                 </StackPanel>
             </Grid>
         </Grid>

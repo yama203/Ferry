@@ -103,10 +103,4 @@ public static class AppServices
         }
         catch (IOException) { }
     }
-
-    public static string StorageDescription => Store.Shared.IsEnabled
-        ? $"会社の共有: {Store.Shared.DirectoryPath}"
-        : Store.KeepsPerPcSettingsLocally
-            ? "保存場所: iCloud Drive（Mac と同期）"
-            : $"保存場所: {Path.GetDirectoryName(Store.FilePath)}";
 }

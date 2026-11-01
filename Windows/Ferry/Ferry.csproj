@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <Content Include="Assets\Ferry.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Ferry.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

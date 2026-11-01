@@ -30,12 +30,17 @@ public sealed partial class MainWindow : Window
 
         var icon = Path.Combine(AppContext.BaseDirectory, "Ferry.ico");
         if (File.Exists(icon)) AppWindow.SetIcon(icon);
-        VersionText.Text = $"Ferry {Updater.CurrentVersion}";
+        VersionText.Text = Updater.CurrentVersion;
 
         Sidebar.Rebuild();
         AppServices.Store.Changed += (_, _) => AppServices.OnUi(OnStoreChanged);
-        AppServices.VaultsChanged += (_, _) => AppServices.OnUi(UpdateVaultBar);
+        AppServices.VaultsChanged += (_, _) => AppServices.OnUi(() =>
+        {
+            UpdateVaultBar();
+            UpdateSyncStatus();
+        });
         UpdateVaultBar();
+        UpdateSyncStatus();
         _ = CheckForUpdateAsync();
 
         // 前回開いていた接続先を開く
@@ -106,6 +111,7 @@ public sealed partial class MainWindow : Window
     private void OnStoreChanged()
     {
         Sidebar.Rebuild();
+        UpdateSyncStatus();
         SelectCurrentRow();
         // 他の人が共有の接続先を消した場合など、無くなった接続先の画面は閉じる
         foreach (var id in _sessions.Keys.Where(id => AppServices.Store.Server(id) is null).ToList())
@@ -385,6 +391,43 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(item);
     }
 
+    // MARK: 左下の同期の状態
+
+    /// <summary>iCloud（自分の Mac と同期）と会社の共有を、アイコンだけで出す。詳しいことはマウスを乗せると出る</summary>
+    private void UpdateSyncStatus()
+    {
+        var store = AppServices.Store;
+        static string VaultText(PasswordVault? vault) => vault?.State switch
+        {
+            PasswordVault.VaultState.Unlocked => $"パスワードも同期しています（{vault.Count} 件）",
+            PasswordVault.VaultState.Locked => "パスワードの同期: マスターパスワードの入力が必要です",
+            _ => "パスワードは同期していません",
+        };
+        var caution = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
+        var normal = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+
+        ICloudStatus.Visibility = store.KeepsPerPcSettingsLocally ? Visibility.Visible : Visibility.Collapsed;
+        ICloudIcon.Foreground = AppServices.Passwords.Personal?.State == PasswordVault.VaultState.Locked ? caution : normal;
+        ToolTipService.SetToolTip(ICloudStatus,
+            $"iCloud Drive で自分の Mac と同期しています\n{VaultText(AppServices.Passwords.Personal)}");
+
+        SharedStatus.Visibility = store.Shared.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
+        SharedIcon.Foreground = AppServices.Passwords.Shared?.State == PasswordVault.VaultState.Locked ? caution : normal;
+        ToolTipService.SetToolTip(SharedStatus,
+            $"会社の共有: {store.Shared.Servers.Count} 件の接続先\n{store.Shared.DirectoryPath}\n{VaultText(AppServices.Passwords.Shared)}");
+    }
+
+    private async void ICloudStatus_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Passwords);
+
+    private async void SharedStatus_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Shared);
+
+    private async Task OpenSettingsAsync(SettingsDialog.Tab tab)
+    {
+        await Dialogs.ShowAsync(new SettingsDialog(XamlRootOrThrow, tab));
+        UpdateVaultBar();
+        UpdateSyncStatus();
+    }
+
     // MARK: パスワードの同期
 
     private void UpdateVaultBar()
@@ -467,6 +510,5 @@ public sealed partial class MainWindow : Window
     private async void ImportWinScp_Click(object sender, RoutedEventArgs e) =>
         await ImportDialog.ImportWinScpAsync(XamlRootOrThrow);
 
-    private async void Settings_Click(object sender, RoutedEventArgs e) =>
-        await Dialogs.ShowAsync(new SettingsDialog(XamlRootOrThrow));
+    private async void Settings_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Shared);
 }

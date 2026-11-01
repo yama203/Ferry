@@ -44,9 +44,6 @@ public sealed partial class SidebarViewModel : ObservableObject
     public partial string SearchText { get; set; } = "";
 
     [ObservableProperty]
-    public partial string StorageDescription { get; private set; } = "";
-
-    [ObservableProperty]
     public partial bool IsSearchEmpty { get; private set; }
 
     private readonly HashSet<Guid> _collapsed;
@@ -112,7 +109,6 @@ public sealed partial class SidebarViewModel : ObservableObject
         }
 
         ApplyRows(rows);
-        StorageDescription = AppServices.StorageDescription;
     }
 
     /// <summary>
