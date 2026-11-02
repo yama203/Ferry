@@ -21,7 +21,9 @@ final class ServerSession {
     let remote: BrowserModel
     let transfers: TransferQueue
     @ObservationIgnored private(set) var editWatcher: EditWatcher!
-    private(set) var status: Status = .idle
+    private(set) var status: Status = .idle {
+        didSet { recordProblem() }
+    }
     /// 接続後に開くブックマーク（サイドバーから「〜で接続」を選んだときなど）
     @ObservationIgnored var pendingBookmark: PaneBookmark?
     /// 編集用にダウンロード中のファイル名
@@ -97,6 +99,21 @@ final class ServerSession {
             status = .untrustedCertificate(error.localizedDescription)
         } catch {
             status = .failed(error.localizedDescription)
+        }
+    }
+
+    /// 接続できたか・できなかったかをサイドバーの印に反映する
+    private func recordProblem() {
+        switch status {
+        case .connected:
+            ConnectionProblems.shared.set(nil, for: server.id)
+        case .failed(let message):
+            ConnectionProblems.shared.set(message, for: server.id)
+        // パスワードを保存していないだけのときは印を出さない（ログインに失敗したときだけ理由がある）
+        case .needsPassword(let message?):
+            ConnectionProblems.shared.set("ログインできませんでした（パスワードが変わったかもしれません）。\(message)", for: server.id)
+        default:
+            break
         }
     }
 

@@ -1,4 +1,4 @@
-// swift-tools-version:6.0
+// swift-tools-version:6.2
 import PackageDescription
 
 // Homebrew の curl（libssh2 同梱で SFTP 対応）を使う。macOS 標準の libcurl は SFTP 非対応。
@@ -6,7 +6,7 @@ let curlPrefix = "/opt/homebrew/opt/curl"
 
 let package = Package(
     name: "FerryKit",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v26)],
     products: [
         .library(name: "FerryKit", targets: ["FerryKit"]),
         .executable(name: "ferry-cli", targets: ["ferry-cli"]),

@@ -175,6 +175,7 @@ struct ServerSidebar: View {
                 sessions.close(server.id)
                 if selection == server.id { selection = nil }
                 store.delete(server.id)
+                ConnectionProblems.shared.set(nil, for: server.id)
             }
         } message: { server in
             Text(store.isShared(server.id)
@@ -305,10 +306,8 @@ struct ServerSidebar: View {
     private static let animatedRowLimit = 6
 
 
-    private func moveServers(_ ids: [String], to folderID: UUID?, shared: Bool) -> Bool {
-        let uuids = ids.compactMap(UUID.init(uuidString:))
-        uuids.forEach { store.moveServer($0, toFolder: folderID, shared: shared) }
-        return !uuids.isEmpty
+    private func moveServers(_ ids: [String], to folderID: UUID?, shared: Bool) {
+        ids.compactMap(UUID.init(uuidString:)).forEach { store.moveServer($0, toFolder: folderID, shared: shared) }
     }
 
     private func startFolderName(_ target: FolderNameTarget) {
@@ -347,21 +346,31 @@ private struct ServerRow: View {
     let isShared: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Text(server.name.isEmpty ? server.host : server.name)
-                    .lineLimit(1)
-                if isShared {
-                    Image(systemName: "person.2.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .help("会社で共有している接続先")
+        HStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(server.name.isEmpty ? server.host : server.name)
+                        .lineLimit(1)
+                    if isShared {
+                        Image(systemName: "person.2.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .help("会社で共有している接続先")
+                    }
                 }
+                Text("\(server.serverProtocol.displayName)  \(server.host)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            Text("\(server.serverProtocol.displayName)  \(server.host)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Spacer(minLength: 0)
+            // 最後に接続できなかった（理由はマウスを乗せると出る）
+            if let problem = ConnectionProblems.shared[server.id] {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.yellow)
+                    .help(problem)
+            }
         }
         .padding(.vertical, 2)
     }

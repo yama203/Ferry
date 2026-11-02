@@ -312,6 +312,7 @@ public sealed partial class MainWindow : Window
             if (!await Dialogs.ConfirmAsync(XamlRootOrThrow, $"「{server.Name}」を削除しますか？", message, "削除", destructive: true))
                 return;
             store.Delete(server.Id);
+            AppServices.SetConnectionProblem(server.Id, null);
         });
     }
 

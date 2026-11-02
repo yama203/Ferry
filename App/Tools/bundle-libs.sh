@@ -76,4 +76,17 @@ if [[ -n "$leftover$missing" ]]; then
     echo "$leftover$missing" >&2
     exit 1
 fi
+
+# Homebrew のライブラリは、この Mac の macOS 向けにビルドされている。アプリの対応 OS より新しい macOS 向けだと
+# 古い macOS では起動できないので止める（project.yml の deploymentTarget を上げるか、ライブラリを作り直す）
+target=$(otool -l "$BINARY" | awk '/minos/{print $2; exit}')
+newer=$(for lib in "$FRAMEWORKS"/*.dylib; do
+    minos=$(otool -l "$lib" | awk '/minos/{print $2; exit}')
+    [[ "$(printf '%s\n%s\n' "$target" "$minos" | sort -V | tail -1)" != "$target" ]] && echo "${lib:t}（macOS $minos 以降）"
+done || true)
+if [[ -n "$newer" ]]; then
+    echo "❌ アプリの対応 OS（macOS $target）より新しい macOS 向けのライブラリがあります:" >&2
+    echo "$newer" >&2
+    exit 1
+fi
 echo "📦 ${#copied} 個のライブラリと証明書を同梱しました"

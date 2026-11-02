@@ -2,7 +2,7 @@ name: Ferry
 options:
   bundleIdPrefix: com.yama
   deploymentTarget:
-    macOS: "15.0"
+    macOS: "26.0"
   createIntermediateGroups: true
 packages:
   FerryKit:
