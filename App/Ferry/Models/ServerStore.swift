@@ -2,7 +2,84 @@ import FerryKit
 import Foundation
 import Observation
 
-/// 接続先リスト。自分の接続先は iCloud Drive/Ferry/servers.json に保存して Mac 間で同期し、
+/// 自分の接続先（servers.json）とパスワードの保管庫（passwords.vault）の保存場所。Windows 版の PersonalLocation と同じ決め方。
+enum PersonalLocation: Equatable {
+    /// iCloud Drive/Ferry（iCloud Drive があれば既定）
+    case iCloud
+    /// 選んだフォルダ（自分だけの Dropbox など）
+    case folder(URL)
+    /// この Mac だけ（Application Support/Ferry。同期しない）
+    case local
+
+    /// UserDefaults のキー。値が無ければ自動、"local" でこの Mac だけ、それ以外はフォルダのパス
+    static let defaultsKey = "personalDirectory"
+
+    static var iCloudDirectory: URL? {
+        let iCloudDrive = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
+        return FileManager.default.fileExists(atPath: iCloudDrive.path) ? iCloudDrive.appendingPathComponent("Ferry") : nil
+    }
+
+    static var localDirectory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Ferry")
+    }
+
+    /// 設定から場所を決める。選んだフォルダが無くなっていたら自動に戻す
+    static var current: PersonalLocation {
+        let setting = UserDefaults.standard.string(forKey: defaultsKey)
+        if setting == "local" { return .local }
+        if let setting, FileManager.default.fileExists(atPath: setting) {
+            let url = URL(fileURLWithPath: setting)
+            return url.standardizedFileURL == iCloudDirectory?.standardizedFileURL ? .iCloud : .folder(url)
+        }
+        return iCloudDirectory != nil ? .iCloud : .local
+    }
+
+    var directory: URL {
+        switch self {
+        case .iCloud: Self.iCloudDirectory ?? Self.localDirectory
+        case .folder(let url): url
+        case .local: Self.localDirectory
+        }
+    }
+
+    var isSynced: Bool { self != .local }
+
+    var displayName: String {
+        switch self {
+        case .iCloud: "iCloud Drive（他の Mac・Windows と同期）"
+        case .folder(let url): url.path
+        case .local: "この Mac だけ（同期しない）"
+        }
+    }
+
+    /// 次の起動からこの場所を使う。新しい場所にまだ servers.json が無ければ、今の servers.json と passwords.vault をコピーする。
+    /// 戻り値は「すでにあったので、そちらを使う」か（2 台目の PC など）。
+    @discardableResult
+    func makeCurrent(movingFrom current: PersonalLocation) throws -> Bool {
+        let fileManager = FileManager.default
+        let target = directory
+        let existing = fileManager.fileExists(atPath: target.appendingPathComponent("servers.json").path)
+        if !existing {
+            try fileManager.createDirectory(at: target, withIntermediateDirectories: true)
+            for name in ["servers.json", "passwords.vault"] {
+                let source = current.directory.appendingPathComponent(name)
+                let destination = target.appendingPathComponent(name)
+                if fileManager.fileExists(atPath: source.path), !fileManager.fileExists(atPath: destination.path) {
+                    try fileManager.copyItem(at: source, to: destination)
+                }
+            }
+        }
+        switch self {
+        case .iCloud: UserDefaults.standard.removeObject(forKey: Self.defaultsKey)
+        case .folder(let url): UserDefaults.standard.set(url.path, forKey: Self.defaultsKey)
+        case .local: UserDefaults.standard.set("local", forKey: Self.defaultsKey)
+        }
+        return existing
+    }
+}
+
+/// 接続先リスト。自分の接続先は保存場所（iCloud Drive・選んだフォルダ・この Mac）の servers.json に保存し、
 /// 会社で共有する接続先は SharedStore（Dropbox などの共有フォルダ）に保存する。
 @MainActor @Observable
 final class ServerStore {
@@ -16,7 +93,11 @@ final class ServerStore {
     /// 転送・同期で除外するファイル名のパターン（Mac 間で同期）
     private(set) var excludeRules = ExcludeRules.defaults
     let fileURL: URL
-    let isICloud: Bool
+    /// 自分の接続先の保存場所（変えたら再起動で切り替える）
+    let location: PersonalLocation
+    var isICloud: Bool { location == .iCloud }
+    /// 他の PC と同期する場所か（パスワードの保管庫もここに置く）
+    var isSynced: Bool { location.isSynced }
     /// 読み込みの確認画面に渡す内容（メニューから開く）
     var pendingImport: TransmitImporter.Result?
     var importError: String?
@@ -75,24 +156,14 @@ final class ServerStore {
     }
 
     init() {
-        let fileManager = FileManager.default
-        let iCloudDrive = fileManager.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
-        let directory: URL
-        if fileManager.fileExists(atPath: iCloudDrive.path) {
-            directory = iCloudDrive.appendingPathComponent("Ferry")
-            isICloud = true
-        } else {
-            directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Ferry")
-            isICloud = false
-        }
-        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        location = PersonalLocation.current
+        let directory = location.directory
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         fileURL = directory.appendingPathComponent("servers.json")
 
         load()
 
-        // 他の Mac での変更が iCloud から届いたら読み直す
+        // 他の PC での変更が iCloud・Dropbox などから届いたら読み直す
         let presenter = FilePresenter(url: fileURL) { [weak self] in
             Task { @MainActor in self?.load() }
         }

@@ -106,7 +106,7 @@ Windows/
 - ブックマーク: 接続先ごとに「左のフォルダ + 右のフォルダ」の組み合わせを保存。選ぶと両方のペインがそこを開く。「接続時に開く」を設定できる。
 - 除外ルールの既定: `.git` `.svn` `.hg` `node_modules` `.DS_Store` `._*` `Thumbs.db` `desktop.ini` `.idea` `.sass-cache` `__pycache__` `*.swp` `*~` `*.ferrypart`（`*` と `?` が使える。名前だけで判定）。
 - 読み込み: Windows では **FileZilla**（`%APPDATA%\FileZilla\sitemanager.xml`）と **WinSCP** からの読み込みがあると便利（Mac 版の Transmit からの読み込みの代わり）。
-- 設定画面のタブ: 会社の共有、パスワード（自分の同期・会社の同期）、除外、エディタ、通知。
+- 設定画面のタブ: 会社の共有、保存場所（自分の接続先）、パスワード（自分の同期・会社の同期）、除外、エディタ、通知。
 
 ### Windows 版では作らないもの
 
@@ -155,9 +155,20 @@ Windows/
 
 ### 自分の接続先
 
-Mac 版は iCloud Drive の `Ferry/servers.json`。Windows 版は、iCloud Drive（Windows 用 iCloud の `%USERPROFILE%\iCloudDrive`）があれば **Mac 版と同じ `iCloudDrive\Ferry\servers.json` を使う**（自分の Mac と Windows で同期）。無ければ `%APPDATA%\Ferry\servers.json`。iCloud Drive を使い始めたときに `%APPDATA%` の分があれば一度だけ取り込む。
+自分の接続先（`servers.json`）とパスワードの保管庫（`passwords.vault`）の**保存場所は選べる**（設定の「保存場所」。Mac・Windows とも）:
 
-Mac 版とファイルを共有するとき、PC ごとの設定（`localPath` `privateKeyPath` `bookmarks` `startBookmarkID`、`sharedOverrides`）は Mac のパスなので、Windows 版は**ファイルの値を書き換えずに残し**、この PC の分を `%LOCALAPPDATA%\Ferry\overrides.json` に持つ（`{"personal": {ID: 上書き}, "shared": {ID: 上書き}}`）。Mac で作ったブックマークは Windows には出ず、Windows で作ったものは Mac には出ない。
+| 保存場所 | Mac | Windows | 同期 |
+|---|---|---|---|
+| iCloud Drive（iCloud Drive があれば既定） | `~/Library/Mobile Documents/com~apple~CloudDocs/Ferry` | `%USERPROFILE%\iCloudDrive\Ferry`（Windows 用 iCloud） | する |
+| 選んだフォルダ（自分だけの Dropbox・OneDrive など） | 選んだフォルダ | 選んだフォルダ | する（同じ場所を選んだ PC 同士） |
+| この PC だけ | `~/Library/Application Support/Ferry` | `%APPDATA%\Ferry` | しない |
+
+- 設定の値: Mac は UserDefaults の `personalDirectory`、Windows は `settings.json` の `personalDirectory`。無ければ自動（iCloud Drive があればそこ、無ければこの PC）、`"local"` でこの PC だけ、それ以外はフォルダのパス。選んだフォルダが無くなっていたら自動に戻す。
+- 場所を変えると、新しい場所にまだ `servers.json` が無ければ今の `servers.json` と `passwords.vault` をコピーし、すでにあれば（2 台目の PC など）そちらを使う。切り替えは再起動で。
+- パスワードの保管庫（自分）は、同期する場所（iCloud Drive・選んだフォルダ）のときだけ使える。
+- Windows 版は、同期する場所を使い始めたときに `%APPDATA%\Ferry\servers.json` の分があれば一度だけ取り込む。
+
+同期する場所でファイルを Mac 版と共有するとき、PC ごとの設定（`localPath` `privateKeyPath` `bookmarks` `startBookmarkID`、`sharedOverrides`）は Mac のパスなので、Windows 版は**ファイルの値を書き換えずに残し**、この PC の分を `%LOCALAPPDATA%\Ferry\overrides.json` に持つ（`{"personal": {ID: 上書き}, "shared": {ID: 上書き}}`）。Mac で作ったブックマークは Windows には出ず、Windows で作ったものは Mac には出ない。
 
 ```
 
@@ -179,7 +190,7 @@ Mac 版とファイルを共有するとき、PC ごとの設定（`localPath` `
 
 | 保管庫 | 場所 | 入るもの | 鍵の名前（PC に保存） |
 |---|---|---|---|
-| 自分 | iCloud Drive の `Ferry/passwords.vault` | 自分の接続先のパスワード | `vault-key` |
+| 自分 | 自分の接続先の保存場所の `passwords.vault`（既定は iCloud Drive の `Ferry`） | 自分の接続先のパスワード | `vault-key` |
 | 会社 | `<共有フォルダ>/passwords.vault` | 共有の接続先のパスワード（会社のマスターパスワードを知っている人が使える） | `shared-vault-key` |
 
 - 探す順: 共有の接続先は 会社 → 自分 → この PC、自分の接続先は 自分 → この PC。保存は この PC と、該当する保管庫（共有なら会社、自分なら自分）。この PC にだけあるパスワードは、使ったときに保管庫へ追加する。

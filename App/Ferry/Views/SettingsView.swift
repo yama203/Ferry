@@ -8,6 +8,8 @@ struct SettingsView: View {
         TabView {
             SharedSettings()
                 .tabItem { Label("会社の共有", systemImage: "person.2") }
+            StorageSettings()
+                .tabItem { Label("保存場所", systemImage: "externaldrive.badge.icloud") }
             PasswordSyncSettings(kind: .personal, vault: vault)
                 .tabItem { Label("パスワード同期", systemImage: "key.icloud") }
             SharedPasswordSettings()
@@ -139,6 +141,85 @@ private struct NotificationSettings: View {
     }
 }
 
+/// 自分の接続先の保存場所（iCloud Drive・選んだフォルダ・この Mac）。変えたら再起動で切り替える
+private struct StorageSettings: View {
+    @Environment(ServerStore.self) private var store
+    @State private var message: String?
+    @State private var needsRestart = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("自分だけの接続先と、同期するパスワードを置く場所です。iCloud Drive や、自分だけの Dropbox などのフォルダを選ぶと、同じ場所を選んだ他の Mac・Windows 版と同期します。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Label(store.location.displayName,
+                  systemImage: store.isICloud ? "icloud" : store.isSynced ? "folder" : "internaldrive")
+                .font(.headline)
+                .textSelection(.enabled)
+            HStack {
+                Button("フォルダを選ぶ…", action: chooseFolder)
+                if PersonalLocation.iCloudDirectory != nil {
+                    Button("iCloud Drive にする") { change(to: .iCloud) }
+                        .disabled(store.location == .iCloud)
+                }
+                Button("この Mac だけにする") { change(to: .local) }
+                    .disabled(store.location == .local)
+            }
+            Text("変えると、新しい場所に一覧が無ければ今の一覧とパスワードの保管庫をコピーします（すでにあればそちらを使います）。Ferry を再起動すると切り替わります。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if needsRestart {
+                HStack {
+                    Spacer()
+                    Button("Ferry を再起動", action: relaunch)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.message = "自分の接続先を置くフォルダを選んでください（例: Dropbox の中の自分だけのフォルダ）"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "このフォルダを使う"
+        if panel.runModal() == .OK, let url = panel.url {
+            change(to: url.standardizedFileURL == PersonalLocation.iCloudDirectory?.standardizedFileURL ? .iCloud : .folder(url))
+        }
+    }
+
+    private func change(to location: PersonalLocation) {
+        do {
+            let usedExisting = try location.makeCurrent(movingFrom: store.location)
+            message = usedExisting
+                ? "「\(location.displayName)」にある一覧に切り替えます（すでにあった一覧を使います）。"
+                : "今の一覧とパスワードの保管庫を「\(location.displayName)」にコピーしました。"
+            needsRestart = true
+        } catch {
+            message = "このフォルダは使えません: \(error.localizedDescription)"
+        }
+    }
+
+    private func relaunch() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
+    }
+}
+
 /// 会社の共有の接続先のパスワードを、共有フォルダで同期する設定（store.shared.passwordVault を見る）
 private struct SharedPasswordSettings: View {
     @Environment(ServerStore.self) private var store
@@ -171,7 +252,7 @@ private struct PasswordSyncSettings: View {
                 case .unlocked: status(vault)
                 }
             } else if kind == .personal {
-                Label("iCloud Drive が使えないため、パスワードの同期はできません", systemImage: "icloud.slash")
+                Label("自分の接続先を「この Mac だけ」に保存しているため、パスワードの同期はできません（「保存場所」で変更）", systemImage: "icloud.slash")
             } else {
                 Label("会社の共有フォルダを設定すると使えます（「会社の共有」のタブ）", systemImage: "person.2.slash")
             }
@@ -193,7 +274,7 @@ private struct PasswordSyncSettings: View {
     private func setup(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if kind == .personal {
-                Text("接続先のパスワードを暗号化して iCloud Drive に保存し、他の Mac や Windows 版と同期します。")
+                Text("接続先のパスワードを暗号化して自分の接続先と同じ場所（「保存場所」のタブ）に保存し、他の Mac や Windows 版と同期します。")
                 Text("暗号化に使う「マスターパスワード」を決めてください。他の PC では最初に 1 回だけ入力します。忘れると同期したパスワードは読み出せません（各 PC に保存済みのパスワードは残ります）。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -264,7 +345,7 @@ private struct PasswordSyncSettings: View {
 
     private func status(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(kind == .personal ? "iCloud Drive で同期中" : "共有フォルダで同期中", systemImage: "checkmark.icloud.fill")
+            Label(kind == .personal ? "\(store.isICloud ? "iCloud Drive" : "フォルダ") で同期中" : "共有フォルダで同期中", systemImage: "checkmark.icloud.fill")
                 .font(.headline)
                 .foregroundStyle(.green)
             Text("\(vault.count) 件のパスワードを同期しています。パスワードを保存・変更すると、\(kind == .personal ? "他の PC" : "会社の人の Ferry")にも反映されます。")

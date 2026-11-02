@@ -9,8 +9,13 @@ public sealed partial class SettingsDialog : ContentDialog
 {
     private string? _sharedDirectory;
 
-    /// <summary>開いたときに選ぶタブ</summary>
-    public enum Tab { Shared, Passwords, Exclude, Editor, Notifications }
+    /// <summary>開いたときに選ぶタブ（左のタブの並び順）</summary>
+    public enum Tab { Shared, Storage, Passwords, Exclude, Editor, Notifications }
+
+    /// <summary>自分の接続先の保存場所を変えたときの説明（再起動を勧める）。変えていなければ null</summary>
+    public string? StorageMessage { get; private set; }
+
+    private PersonalLocation _storage = AppServices.Personal;
 
     public SettingsDialog(XamlRoot root, Tab tab = Tab.Shared)
     {
@@ -23,15 +28,53 @@ public sealed partial class SettingsDialog : ContentDialog
         NotifySwitch.IsOn = AppServices.Settings.NotifyOnComplete;
         UpdateShared();
         UpdateEditor();
+        UpdateStorage();
         RenderVaults();
     }
 
     /// <summary>左のタブを選んだら、右の中身を切り替える（並びは Tab の順）</summary>
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        UIElement[] pages = [SharedPage, PasswordsPage, ExcludePage, EditorPage, NotificationsPage];
+        UIElement[] pages = [SharedPage, StoragePage, PasswordsPage, ExcludePage, EditorPage, NotificationsPage];
         for (var i = 0; i < pages.Length; i++)
             pages[i].Visibility = i == Tabs.SelectedIndex ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // MARK: 自分の接続先の保存場所（保存したときに切り替える）
+
+    private void UpdateStorage()
+    {
+        StorageIcon.Glyph = _storage.Kind switch
+        {
+            PersonalLocation.LocationKind.ICloud => "",
+            PersonalLocation.LocationKind.Folder => "",
+            _ => "",
+        };
+        StorageText.Text = _storage.Description + (_storage == AppServices.Personal ? "" : "（保存すると切り替えます）");
+        UseICloudButton.Visibility = PersonalLocation.ICloudDirectory is null ? Visibility.Collapsed : Visibility.Visible;
+        UseICloudButton.IsEnabled = _storage.Kind != PersonalLocation.LocationKind.ICloud;
+        UseLocalButton.IsEnabled = _storage.Kind != PersonalLocation.LocationKind.Local;
+    }
+
+    private async void ChooseStorage_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Windows.Storage.Pickers.FolderPicker(App.MainWindow!.AppWindow.Id);
+        var result = await picker.PickSingleFolderAsync();
+        if (result is null) return;
+        _storage = PersonalLocation.Resolve(result.Path);
+        UpdateStorage();
+    }
+
+    private void UseICloud_Click(object sender, RoutedEventArgs e)
+    {
+        _storage = PersonalLocation.Resolve(null);
+        UpdateStorage();
+    }
+
+    private void UseLocal_Click(object sender, RoutedEventArgs e)
+    {
+        _storage = PersonalLocation.Resolve(PersonalLocation.LocalSetting);
+        UpdateStorage();
     }
 
     // MARK: パスワードの同期
@@ -41,11 +84,11 @@ public sealed partial class SettingsDialog : ContentDialog
         var store = AppServices.Store;
         VaultsPanel.Children.Clear();
         VaultsPanel.Children.Add(new VaultPanel(
-            "自分の Mac・Windows と同期",
-            "自分の接続先のパスワードを、マスターパスワードで暗号化して iCloud Drive に置きます（Mac 版の「パスワードの同期」と同じもの）。",
+            "自分の PC の間で同期",
+            "自分の接続先のパスワードを、マスターパスワードで暗号化して、自分の接続先と同じ場所（「保存場所」のタブ）に置きます（Mac 版の「パスワードの同期」と同じもの）。",
             () => AppServices.Passwords.Personal,
             () => store.PersonalServers.Select(s => s.Id),
-            "iCloud Drive が見つかりません。Windows 用 iCloud を入れて iCloud Drive を有効にすると使えます。"));
+            "自分の接続先を「この PC だけ」に保存しているので使えません。「保存場所」のタブで iCloud Drive か同期するフォルダを選ぶと使えます。"));
         VaultsPanel.Children.Add(new VaultPanel(
             "会社で同期",
             "会社の共有の接続先のパスワードを、会社のマスターパスワードで暗号化して共有フォルダに置きます。会社のマスターパスワードを知っている人が使えます。",
@@ -129,6 +172,23 @@ public sealed partial class SettingsDialog : ContentDialog
             AppServices.Settings.SharedDirectory = _sharedDirectory;
             AppServices.Settings.Save();
             AppServices.UpdateSharedVault();
+        }
+
+        if (_storage != AppServices.Personal)
+        {
+            try
+            {
+                var usedExisting = AppServices.ChangePersonalLocation(_storage);
+                StorageMessage = usedExisting
+                    ? $"自分の接続先を「{_storage.Description}」にある一覧に切り替えます（すでにあった一覧を使います）。"
+                    : $"今の一覧とパスワードの保管庫を「{_storage.Description}」にコピーしました。再起動すると切り替わります。";
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                args.Cancel = true;
+                StorageText.Text = $"このフォルダは使えません: {e.Message}";
+                return;
+            }
         }
 
         AppServices.Settings.EditorPath = _editorPath;

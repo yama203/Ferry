@@ -19,25 +19,29 @@ public static class AppServices
     private const string PersonalVaultKey = "vault-key";
     private const string SharedVaultKey = "shared-vault-key";
 
+    /// <summary>自分の接続先の保存場所（iCloud Drive・選んだフォルダ・この PC だけ）</summary>
+    public static PersonalLocation Personal { get; private set; } = null!;
+
     public static void Initialize(DispatcherQueue dispatcher)
     {
         Dispatcher = dispatcher;
         Settings = AppSettings.Load();
         Passwords = new PasswordService(Credentials);
 
-        // iCloud Drive があれば、自分の接続先とパスワードは Mac 版と同じファイルを使う（自分の Mac と Windows で同期）
-        if (ServerStore.ICloudFilePath is { } iCloud)
+        // 同期する場所（iCloud Drive・選んだフォルダ）なら、他の PC（Mac 版も）と同じファイルを使う。
+        // PC ごとの設定は別のファイルに分け、パスワードも同じ場所の保管庫で同期する
+        Personal = PersonalLocation.Resolve(Settings.PersonalDirectory);
+        if (Personal.IsSynced)
         {
             var localOverrides = Path.Combine(Path.GetDirectoryName(AppSettings.DefaultPath)!, "overrides.json");
-            Store = new ServerStore(iCloud, Passwords, localOverrides, watch: true);
-            MigrateToICloud();
-            Passwords.Personal = new PasswordVault(Path.Combine(Path.GetDirectoryName(iCloud)!, "passwords.vault"),
-                                                   Credentials, PersonalVaultKey);
+            Store = new ServerStore(Personal.ServersPath, Passwords, localOverrides, watch: true);
+            MigrateFromThisPc();
+            Passwords.Personal = new PasswordVault(Personal.VaultPath, Credentials, PersonalVaultKey);
             Passwords.Personal.Changed += (_, _) => VaultsChanged?.Invoke(null, EventArgs.Empty);
         }
         else
         {
-            Store = new ServerStore(passwords: Passwords);
+            Store = new ServerStore(Personal.ServersPath, Passwords);
         }
         Passwords.IsShared = Store.IsShared;
 
@@ -52,20 +56,39 @@ public static class AppServices
         UpdateSharedVault();
     }
 
-    /// <summary>iCloud Drive を使う前に %APPDATA% に保存していた接続先を、一度だけ取り込む</summary>
-    private static void MigrateToICloud()
+    /// <summary>同期する場所を使う前に、この PC だけ（%APPDATA%）に保存していた接続先を一度だけ取り込む</summary>
+    private static void MigrateFromThisPc()
     {
         var old = ServerStore.DefaultFilePath;
         if (!File.Exists(old)) return;
         try
         {
             Store.MergePersonalFrom(old);
-            File.Move(old, old + ".iCloud に移しました", overwrite: true);
+            File.Move(old, old + ".同期する場所に移しました", overwrite: true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            Log(e, "iCloud Drive への移行");
+            Log(e, "同期する場所への移行");
         }
+    }
+
+    /// <summary>
+    /// 自分の接続先の保存場所を変える（次の起動から）。新しい場所に一覧が無ければ今のものをコピーする。
+    /// 戻り値は「新しい場所にすでに一覧があったので、そちらを使う」か。
+    /// </summary>
+    public static bool ChangePersonalLocation(PersonalLocation location)
+    {
+        var usedExisting = PersonalLocation.PrepareMove(Personal, location);
+        Settings.PersonalDirectory = location.Setting;
+        Settings.Save();
+        return usedExisting;
+    }
+
+    /// <summary>Ferry を起動し直す（保存場所を変えたときなど）</summary>
+    public static void Restart()
+    {
+        if (Environment.ProcessPath is { } exe) System.Diagnostics.Process.Start(exe);
+        Microsoft.UI.Xaml.Application.Current.Exit();
     }
 
     /// <summary>会社の共有フォルダが変わったら、会社のパスワードの保管庫も作り直す</summary>

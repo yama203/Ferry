@@ -11,8 +11,8 @@ struct FerryApp: App {
         let store = ServerStore()
         _store = State(initialValue: store)
         _sessions = State(initialValue: SessionManager(store: store))
-        // パスワードの同期は iCloud Drive が使える場合だけ
-        let vault = store.isICloud ? PasswordVault(directory: store.fileURL.deletingLastPathComponent()) : nil
+        // パスワードの同期は、自分の接続先を同期する場所（iCloud Drive・選んだフォルダ）に置いている場合だけ
+        let vault = store.isSynced ? PasswordVault(directory: store.fileURL.deletingLastPathComponent()) : nil
         Passwords.vault = vault
         // 共有の接続先のパスワードは会社の保管庫（store.shared.passwordVault）に入れる
         Passwords.isShared = { [weak store] id in store?.isShared(id) ?? false }

@@ -8,6 +8,8 @@ public sealed class AppSettings
 {
     /// <summary>会社の共有フォルダ（Dropbox など）。null なら共有しない。</summary>
     public string? SharedDirectory { get; set; }
+    /// <summary>自分の接続先の保存場所。null なら自動（iCloud Drive があればそこ）、"local" でこの PC だけ、それ以外はフォルダ（PersonalLocation）</summary>
+    public string? PersonalDirectory { get; set; }
     /// <summary>サイドバーで閉じているフォルダの ID</summary>
     public List<Guid> CollapsedFolders { get; set; } = [];
     /// <summary>前回開いていた接続先（次回の起動時に開く）</summary>

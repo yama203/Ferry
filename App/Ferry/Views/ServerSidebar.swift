@@ -123,11 +123,13 @@ struct ServerSidebar: View {
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.primary)
             Spacer()
-            Label(store.isICloud ? "iCloud で同期" : "この Mac に保存",
-                  systemImage: store.isICloud ? "icloud" : "internaldrive")
+            Label(store.isICloud ? "iCloud で同期" : store.isSynced ? "フォルダで同期" : "この Mac に保存",
+                  systemImage: store.isICloud ? "icloud" : store.isSynced ? "folder.badge.gearshape" : "internaldrive")
                 .labelStyle(.titleAndIcon)
                 .font(.caption)
-                .help(store.isICloud ? "接続先リストは iCloud Drive/Ferry に保存され、他の Mac と同期されます" : "")
+                .help(store.isSynced
+                      ? "接続先リストは \(store.location.displayName) に保存され、同じ場所を選んだ他の PC と同期されます（設定の「保存場所」で変更）"
+                      : "接続先リストはこの Mac だけに保存されます（設定の「保存場所」で変更）")
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)

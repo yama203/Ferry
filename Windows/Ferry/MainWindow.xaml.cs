@@ -406,10 +406,13 @@ public sealed partial class MainWindow : Window
         var caution = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SystemFillColorCautionBrush"];
         var normal = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
-        ICloudStatus.Visibility = store.KeepsPerPcSettingsLocally ? Visibility.Visible : Visibility.Collapsed;
+        var personal = AppServices.Personal;
+        ICloudStatus.Visibility = personal.IsSynced ? Visibility.Visible : Visibility.Collapsed;
+        ICloudIcon.Glyph = personal.Kind == PersonalLocation.LocationKind.ICloud ? "" : "";
         ICloudIcon.Foreground = AppServices.Passwords.Personal?.State == PasswordVault.VaultState.Locked ? caution : normal;
-        ToolTipService.SetToolTip(ICloudStatus,
-            $"iCloud Drive で自分の Mac と同期しています\n{VaultText(AppServices.Passwords.Personal)}");
+        ToolTipService.SetToolTip(ICloudStatus, personal.Kind == PersonalLocation.LocationKind.ICloud
+            ? $"iCloud Drive で自分の Mac と同期しています\n{VaultText(AppServices.Passwords.Personal)}"
+            : $"自分の接続先をフォルダで同期しています\n{personal.Directory}\n{VaultText(AppServices.Passwords.Personal)}");
 
         SharedStatus.Visibility = store.Shared.IsEnabled ? Visibility.Visible : Visibility.Collapsed;
         SharedIcon.Foreground = AppServices.Passwords.Shared?.State == PasswordVault.VaultState.Locked ? caution : normal;
@@ -417,15 +420,26 @@ public sealed partial class MainWindow : Window
             $"会社の共有: {store.Shared.Servers.Count} 件の接続先\n{store.Shared.DirectoryPath}\n{VaultText(AppServices.Passwords.Shared)}");
     }
 
-    private async void ICloudStatus_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Passwords);
+    private async void ICloudStatus_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Storage);
 
     private async void SharedStatus_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Shared);
 
     private async Task OpenSettingsAsync(SettingsDialog.Tab tab)
     {
-        await Dialogs.ShowAsync(new SettingsDialog(XamlRootOrThrow, tab));
+        var dialog = new SettingsDialog(XamlRootOrThrow, tab);
+        await Dialogs.ShowAsync(dialog);
         UpdateVaultBar();
         UpdateSyncStatus();
+        // 自分の接続先の保存場所を変えたら、起動し直すと切り替わる
+        if (dialog.StorageMessage is { } message
+            && await Dialogs.ConfirmAsync(XamlRootOrThrow, "Ferry を再起動しますか？", message, "再起動"))
+        {
+            var running = _sessions.Values.Sum(s => s.ViewModel.Transfers.ActiveCount);
+            if (running > 0 && !await Dialogs.ConfirmAsync(XamlRootOrThrow, "転送中です",
+                    $"{running} 件の転送が終わっていません。再起動すると中止されます。", "再起動", destructive: true))
+                return;
+            AppServices.Restart();
+        }
     }
 
     // MARK: パスワードの同期

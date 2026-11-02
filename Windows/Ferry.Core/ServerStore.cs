@@ -107,16 +107,6 @@ public sealed class ServerStore : IDisposable
     public static string DefaultFilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Ferry", "servers.json");
 
-    /// <summary>iCloud Drive にある Mac 版の servers.json（無ければ null）</summary>
-    public static string? ICloudFilePath
-    {
-        get
-        {
-            var iCloud = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "iCloudDrive");
-            return Directory.Exists(iCloud) ? Path.Combine(iCloud, "Ferry", "servers.json") : null;
-        }
-    }
-
     /// <param name="filePath">servers.json の場所</param>
     /// <param name="passwords">削除・複製・移動のときにパスワードも扱う</param>
     /// <param name="localOverridesPath">servers.json を他の PC と共有しているとき、この PC の設定を置くファイル</param>
