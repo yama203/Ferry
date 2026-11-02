@@ -45,27 +45,26 @@ public sealed class PasswordService : IPasswordStore
         VaultFor(serverId)?.SetPassword(serverId, password);
     }
 
-    /// <summary>この PC にだけあるパスワードを保管庫へまとめて追加する（同期を始めたときなど）。戻り値は追加した件数</summary>
-    public int AddLocalPasswords(PasswordVault vault, IEnumerable<Guid> serverIds)
-    {
-        var entries = new Dictionary<Guid, string>();
-        foreach (var id in serverIds)
-        {
-            if (!vault.Contains(id) && _local.GetPassword(id) is { Length: > 0 } password) entries[id] = password;
-        }
-        return vault.Add(entries);
-    }
+    /// <summary>
+    /// どこかに保存してあるパスワード（会社の保管庫・自分の保管庫・この PC のどれか）。
+    /// 保管庫に入れる最初の中身などに使う（この PC の分だけだと、Mac で保存して自分の保管庫にしか無いものが漏れる）
+    /// </summary>
+    public string? KnownPassword(Guid serverId) =>
+        Shared?.GetPassword(serverId) ?? Personal?.GetPassword(serverId) ?? _local.GetPassword(serverId);
 
-    /// <summary>この PC のパスワード（保管庫に入れる最初の中身など）</summary>
-    public Dictionary<Guid, string> LocalPasswords(IEnumerable<Guid> serverIds)
+    public Dictionary<Guid, string> KnownPasswords(IEnumerable<Guid> serverIds)
     {
         var result = new Dictionary<Guid, string>();
         foreach (var id in serverIds)
         {
-            if (_local.GetPassword(id) is { Length: > 0 } password) result[id] = password;
+            if (KnownPassword(id) is { Length: > 0 } password) result[id] = password;
         }
         return result;
     }
+
+    /// <summary>保管庫にまだ無いパスワードを、どこかに保存してあるものからまとめて追加する。戻り値は追加した件数</summary>
+    public int AddKnownPasswords(PasswordVault vault, IEnumerable<Guid> serverIds) =>
+        vault.Add(KnownPasswords(serverIds.Where(id => !vault.Contains(id))));
 
     /// <summary>この PC にパスワードを保存する（保管庫には書かない。同期をやめたときに残す用）</summary>
     public void SetLocalPassword(Guid serverId, string? password) => _local.SetPassword(serverId, password);

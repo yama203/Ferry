@@ -212,10 +212,11 @@ private struct PasswordSyncSettings: View {
                 Button("同期を始める") {
                     guard master.count >= 8 else { return message = "8 文字以上にしてください" }
                     guard master == confirm else { return message = "2 つの入力が一致しません" }
-                    // この Mac に保存してあるパスワードを最初の中身にする
+                    // 保存してあるパスワード（キーチェーンと、会社の同期なら自分の保管庫も）を最初の中身にする
                     var initial: [UUID: String] = [:]
                     for server in store.servers where serverIDs.contains(server.id) {
-                        if let password = Keychain.password(for: server.id) { initial[server.id] = password }
+                        let synced = kind == .shared ? Passwords.vault?.password(for: server.id) : nil
+                        if let password = synced ?? Keychain.password(for: server.id) { initial[server.id] = password }
                     }
                     do {
                         try vault.enable(masterPassword: master, initial: initial)

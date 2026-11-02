@@ -258,13 +258,18 @@ enum Passwords {
         return local
     }
 
-    /// この Mac のキーチェーンにあって同期にまだ無いパスワードを追加する。
+    /// この Mac のキーチェーン（会社の保管庫へは、自分の保管庫も）にあって同期にまだ無いパスワードを追加する。
     /// 戻り値は追加した件数と、読めなかったもの（OSStatus ごとの件数）。
     static func addLocalPasswordsToVault(_ vault: PasswordVault?, serverIDs: [UUID]) -> (added: Int, failures: [OSStatus: Int]) {
         guard let vault, vault.state == .unlocked else { return (0, [:]) }
         var entries: [UUID: String] = [:]
         var failures: [OSStatus: Int] = [:]
         for id in serverIDs where !vault.contains(id) {
+            // 会社の保管庫へ入れるときは、自分の保管庫にしか無いもの（他の PC で保存したもの）も使う
+            if vault !== Passwords.vault, let synced = Passwords.vault?.password(for: id) {
+                entries[id] = synced
+                continue
+            }
             let (value, status) = Keychain.readSecret(account: id.uuidString)
             if let value {
                 entries[id] = value

@@ -47,10 +47,10 @@ public sealed partial class VaultPanel : StackPanel
         {
             case PasswordVault.VaultState.Unlocked:
                 Children.Add(Status($"同期しています（{vault.Count} 件）", ""));
-                var add = new HyperlinkButton { Content = "この PC に保存したパスワードを同期に追加", Padding = new Thickness(0) };
+                var add = new HyperlinkButton { Content = "保存してあるパスワードを同期に追加", Padding = new Thickness(0) };
                 add.Click += (_, _) =>
                 {
-                    var added = AppServices.Passwords.AddLocalPasswords(vault, _serverIds());
+                    var added = AppServices.Passwords.AddKnownPasswords(vault, _serverIds());
                     Render($"{added} 件を追加しました。");
                 };
                 Children.Add(add);
@@ -87,7 +87,7 @@ public sealed partial class VaultPanel : StackPanel
                     {
                         if (vault.Unlock(master.Password))
                         {
-                            AppServices.Passwords.AddLocalPasswords(vault, _serverIds());
+                            AppServices.Passwords.AddKnownPasswords(vault, _serverIds());
                             Render("この PC でも同期を始めました。");
                         }
                         else
@@ -128,7 +128,7 @@ public sealed partial class VaultPanel : StackPanel
                         Render("2 つのマスターパスワードが違います。");
                         return;
                     }
-                    var initial = AppServices.Passwords.LocalPasswords(_serverIds());
+                    var initial = AppServices.Passwords.KnownPasswords(_serverIds());
                     vault.Enable(first.Password, initial);
                     Render($"同期を始めました（{initial.Count} 件）。他の PC でも同じマスターパスワードを入力してください。");
                 };

@@ -180,6 +180,30 @@ public class PasswordServiceTests
     }
 
     [Fact]
+    public void 会社の同期を始めるときは自分の保管庫にしか無いパスワードも入れる()
+    {
+        using var temp = new TempDirectory();
+        var local = new MemoryPasswordStore();
+        using var personalVault = new PasswordVault(temp.Combine("me.vault"), new MemorySecretStore(), "me", watch: false);
+        using var sharedVault = new PasswordVault(temp.Combine("company.vault"), new MemorySecretStore(), "company", watch: false);
+        var macOnly = Guid.NewGuid();
+        var pcOnly = Guid.NewGuid();
+        var nowhere = Guid.NewGuid();
+        // Mac で保存して、自分の保管庫にだけあるもの
+        personalVault.Enable("me", new Dictionary<Guid, string> { [macOnly] = "from mac" });
+        local.SetPassword(pcOnly, "from pc");
+        var service = new PasswordService(local) { Personal = personalVault, Shared = sharedVault, IsShared = _ => true };
+
+        var initial = service.KnownPasswords([macOnly, pcOnly, nowhere]);
+        sharedVault.Enable("company", initial);
+
+        Assert.Equal("from mac", sharedVault.GetPassword(macOnly));
+        Assert.Equal("from pc", sharedVault.GetPassword(pcOnly));
+        Assert.Equal(2, sharedVault.Count);
+        Assert.Equal(0, service.AddKnownPasswords(sharedVault, [macOnly, pcOnly, nowhere]));
+    }
+
+    [Fact]
     public void 保管庫がロック中ならこのPCのパスワードを使う()
     {
         using var temp = new TempDirectory();
