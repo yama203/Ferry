@@ -31,6 +31,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 自動更新の一覧の署名を確かめる公開鍵（release.ps1 が最初のリリースで作る。Updater.PublicKey） -->
+    <EmbeddedResource Include="release-public-key.txt" LogicalName="release-public-key.txt" Condition="Exists('release-public-key.txt')" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Ferry.Core\Ferry.Core.csproj" />
   </ItemGroup>
 

@@ -497,6 +497,8 @@ public sealed partial class MainWindow : Window
             Updater.Status.NoSource => ("更新を確かめられません",
                 "会社の共有フォルダを設定すると、そこ（App\\Windows）から更新を受け取れます。"),
             Updater.Status.NotInstalled => ("更新を確かめられません", "インストールしていない（開発中の）Ferry では更新できません。"),
+            Updater.Status.Unverified => ("更新を入れませんでした",
+                "共有フォルダの更新の署名を確かめられませんでした。共有フォルダの同期の途中のこともあるので、しばらくして確かめ直してください。続くときは、開発者以外が置いた可能性があるので開発者に知らせてください。"),
             _ => ("更新を確かめられませんでした", "共有フォルダが読めるか確かめてください。くわしくは ferry.log にあります。"),
         };
         await Dialogs.ShowErrorAsync(XamlRootOrThrow, title, message);

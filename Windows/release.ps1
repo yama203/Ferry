@@ -4,15 +4,20 @@
 #   .\release.ps1 -Arm64       … ARM 版 Windows 用（win-arm64）も作る
 #   .\release.ps1 -Local       … 手元でパッケージを作るだけ（コミット・共有フォルダ・GitHub には触らない。試し用）
 #
-# 流れ: テスト → ビルド → Velopack でまとめる → 会社の共有フォルダ（<共有フォルダ>\App\Windows）に置く
+# 流れ: テスト → ビルド → Velopack でまとめる → 会社の共有フォルダ（<共有フォルダ>\App\Windows）に置いて一覧に署名する
 #       → バージョンをコミットしてタグ（windows-vX.Y.Z）→ GitHub のリリースにも置く（gh でログインしていれば）
 # 会社の人は共有フォルダの FerryApp-win-Setup.exe でインストールし、以後は Ferry が共有フォルダから自動更新する。
+# 更新の一覧（releases.<チャンネル>.json）には、この PC だけにある秘密鍵で署名する（.sig）。Ferry は組み込んだ公開鍵
+# （Ferry\release-public-key.txt）で確かめ、署名が合わない更新は入れない。秘密鍵は最初のリリースで作るので、
+# 自分だけの場所（パスワード管理アプリなど）にバックアップしておく。失くすと、配った Ferry は各自で入れ直すことになる。
 param(
     [string]$Version,
     [switch]$Arm64,
     [switch]$Local,
     # 共有フォルダ（省略時はこの PC の Ferry の設定から）
-    [string]$SharedDirectory
+    [string]$SharedDirectory,
+    # 署名の秘密鍵（共有フォルダや GitHub には置かない）
+    [string]$SigningKey = (Join-Path $env:LOCALAPPDATA 'Ferry\release-signing-key.pem')
 )
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
@@ -67,6 +72,12 @@ if (-not $Local -and -not $updateDirectory) {
 # テスト（ネットワークを使うものは除く）
 Run dotnet @('test', 'Ferry.Tests', '--filter', 'Category!=Network', '--nologo', '-v', 'q')
 
+# 署名の鍵（無ければ作り、組み込む公開鍵を書く。公開鍵があるのに秘密鍵が無いときは止まる）
+$publicKeyFile = Join-Path $PSScriptRoot 'Ferry\release-public-key.txt'
+if (-not $Local) {
+    Run dotnet @('run', '--project', 'Tools\ReleaseSigner', '--', 'key', $SigningKey, $publicKeyFile)
+}
+
 # バージョンを書き換える（-Local では元に戻す）
 [IO.File]::WriteAllText($project, $projectText.Replace("<Version>$current</Version>", "<Version>$Version</Version>"))
 try {
@@ -98,6 +109,7 @@ try {
             # 共有した全員の Dropbox に同期されるので、置くのは最新の版だけにする（約 200MB）。
             # 1 つ前の版の人は差分で、もっと古い版の人は完全版で更新できる
             Run dotnet @('vpk', 'upload', 'local', '--path', $updateDirectory, '-c', $channel, '-o', $releases, '--keepMaxReleases', '1')
+            Run dotnet @('run', '--project', 'Tools\ReleaseSigner', '--', 'sign', $SigningKey, (Join-Path $updateDirectory "releases.$channel.json"))
             # ポータブル版（zip）は使わないので置かない（vpk には作らない設定が無いので、置いた後で消す）
             Get-ChildItem $updateDirectory -Filter '*-Portable.zip' | Remove-Item -Force
         }
@@ -136,7 +148,7 @@ $notes = (git log --pretty='- %s' $range -- . | Where-Object { $_ -notmatch '^- 
 $notesFile = Join-Path $PSScriptRoot 'Releases\notes.md'
 [IO.File]::WriteAllText($notesFile, "## 変更点`n$(if ($notes) { $notes } else { '- 初回リリース' })", (New-Object Text.UTF8Encoding($false)))
 
-Run git @('add', $project)
+Run git @('add', $project, $publicKeyFile)
 Run git @('commit', '-qm', "Windows 版のバージョン $Version")
 Run git @('tag', $tag)
 Run git @('push', '-q', 'origin', 'HEAD', $tag)

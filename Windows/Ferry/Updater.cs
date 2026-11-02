@@ -1,4 +1,6 @@
+using Ferry.Core;
 using Velopack;
+using Velopack.Logging;
 using Velopack.Sources;
 
 namespace Ferry;
@@ -6,6 +8,7 @@ namespace Ferry;
 /// <summary>
 /// 自動更新（Velopack）。更新の置き場所は会社の共有フォルダの App\Windows（release.ps1 がそこに置く）。
 /// GitHub のリポジトリは非公開なので、会社の人は Dropbox から更新を受け取る。
+/// 共有フォルダに書き込める人なら誰でも更新を置けてしまうので、release.ps1 が署名した一覧（.sig）だけを使う（ReleaseSignature）。
 /// </summary>
 public static class Updater
 {
@@ -30,6 +33,8 @@ public static class Updater
         NoSource,
         /// <summary>インストールしていない（開発中の）ビルド</summary>
         NotInstalled,
+        /// <summary>更新の一覧の署名を確かめられなかった（開発者以外が置いた可能性がある）</summary>
+        Unverified,
         Failed,
     }
 
@@ -44,7 +49,8 @@ public static class Updater
         if (UpdateDirectory is not { } directory || !Directory.Exists(directory)) return new(Status.NoSource);
         try
         {
-            var manager = new UpdateManager(new SimpleFileSource(new DirectoryInfo(directory)));
+            if (PublicKey is not { } publicKey) return new(Status.Unverified);
+            var manager = new UpdateManager(new SignedFileSource(new DirectoryInfo(directory), publicKey));
             if (!manager.IsInstalled) return new(Status.NotInstalled);
             var update = await manager.CheckForUpdatesAsync();
             if (update is null) return new(Status.UpToDate);
@@ -55,6 +61,11 @@ public static class Updater
             _manager = manager;
             _pending = update;
             return new(Status.Downloaded, version);
+        }
+        catch (ReleaseSignatureException e)
+        {
+            AppServices.Log(e, "更新の署名の確認");
+            return new(Status.Unverified);
         }
         catch (Exception e)
         {
@@ -69,5 +80,25 @@ public static class Updater
     {
         if (_manager is null || _pending is null) return;
         _manager.ApplyUpdatesAndRestart(_pending.TargetFullRelease);
+    }
+
+    /// <summary>組み込んだ公開鍵（release.ps1 が最初のリリースで作る release-public-key.txt）</summary>
+    private static string? PublicKey
+    {
+        get
+        {
+            using var stream = typeof(Updater).Assembly.GetManifestResourceStream("release-public-key.txt");
+            if (stream is null) return null;
+            var key = new StreamReader(stream).ReadToEnd().Trim();
+            return key.Length > 0 ? key : null;
+        }
+    }
+
+    /// <summary>共有フォルダの更新のうち、署名を確かめた一覧だけを使う（パッケージは一覧の SHA-256 と Velopack が照合する）</summary>
+    private sealed class SignedFileSource(DirectoryInfo directory, string publicKey) : SimpleFileSource(directory)
+    {
+        public override Task<VelopackAssetFeed> GetReleaseFeed(IVelopackLogger logger, string? appId, string channel,
+            Guid? stagingId = null, VelopackAsset? latestLocalRelease = null) =>
+            Task.FromResult(VelopackAssetFeed.FromJson(ReleaseSignature.ReadVerifiedFeed(BaseDirectory.FullName, channel, publicKey)));
     }
 }
