@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(ServerStore.self) private var store
     @Environment(SessionManager.self) private var sessions
+    @Environment(Updater.self) private var updater
     @State private var selection: UUID?
     /// 前回開いていた接続先を次回起動時に開く
     @AppStorage("lastServerID") private var lastServerID = ""
@@ -53,6 +54,17 @@ struct ContentView: View {
             Button("OK") {}
         } message: {
             Text(store.importError ?? "")
+        }
+        .alert("新しいバージョンがあります", isPresented: Bindable(updater).showsPrompt) {
+            Button("再起動して更新") { updater.installAndRelaunch() }
+            Button("あとで", role: .cancel) {}
+        } message: {
+            let running = sessions.activeTransferCount
+            Text("Ferry \(updater.pendingVersion ?? "") を用意しました。再起動すると更新されます（終了したときにも更新されます）。"
+                 + (running > 0 ? "\n\n\(running) 件の転送が終わっていません。再起動すると中止されます。" : ""))
+        }
+        .alert(item: Bindable(updater).notice) { notice in
+            Alert(title: Text(notice.title), message: Text(notice.message))
         }
         .sheet(item: $editor) { request in
             ServerEditView(server: request.server, isNew: request.isNew,

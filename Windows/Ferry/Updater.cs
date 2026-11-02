@@ -18,32 +18,49 @@ public static class Updater
         AppServices.Settings.UpdateDirectory
         ?? (AppServices.Settings.SharedDirectory is { } shared ? Path.Combine(shared, "App", "Windows") : null);
 
+    /// <summary>起動中に確かめる間隔</summary>
+    public static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
+
+    public enum Status
+    {
+        /// <summary>新しいバージョンをダウンロードした（再起動で入る）</summary>
+        Downloaded,
+        UpToDate,
+        /// <summary>更新の置き場所が無い（共有フォルダを設定していない、など）</summary>
+        NoSource,
+        /// <summary>インストールしていない（開発中の）ビルド</summary>
+        NotInstalled,
+        Failed,
+    }
+
+    public record Result(Status Status, string? Version = null);
+
     private static UpdateManager? _manager;
     private static UpdateInfo? _pending;
 
-    /// <summary>
-    /// 更新があればダウンロードしておく。戻り値は新しいバージョン（無ければ null）。
-    /// インストールしていない（開発中の）ビルドでは何もしない。
-    /// </summary>
-    public static async Task<string?> CheckAndDownloadAsync()
+    /// <summary>更新があればダウンロードしておく</summary>
+    public static async Task<Result> CheckAndDownloadAsync()
     {
-        if (UpdateDirectory is not { } directory || !Directory.Exists(directory)) return null;
+        if (UpdateDirectory is not { } directory || !Directory.Exists(directory)) return new(Status.NoSource);
         try
         {
             var manager = new UpdateManager(new SimpleFileSource(new DirectoryInfo(directory)));
-            if (!manager.IsInstalled) return null;
+            if (!manager.IsInstalled) return new(Status.NotInstalled);
             var update = await manager.CheckForUpdatesAsync();
-            if (update is null) return null;
+            if (update is null) return new(Status.UpToDate);
+            var version = update.TargetFullRelease.Version.ToString();
+            // 前に確かめたときにダウンロード済み
+            if (_pending?.TargetFullRelease.Version.ToString() == version) return new(Status.Downloaded, version);
             await manager.DownloadUpdatesAsync(update);
             _manager = manager;
             _pending = update;
-            return update.TargetFullRelease.Version.ToString();
+            return new(Status.Downloaded, version);
         }
         catch (Exception e)
         {
             // 更新できなくても、そのまま使えるようにする
             AppServices.Log(e, "更新の確認");
-            return null;
+            return new(Status.Failed);
         }
     }
 

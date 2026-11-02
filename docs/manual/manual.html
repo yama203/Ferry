@@ -379,11 +379,12 @@
 <!-- 9 -->
 <section>
   <h2><span class="num">9</span>アップデート</h2>
-  <p>Ferry は起動するたびに、会社の共有フォルダ（<code>Ferry\App\Windows</code>）に新しいバージョンがあるかを確かめ、裏でダウンロードします。</p>
+  <p>Ferry は起動したときと、開いている間は 6 時間ごとに、会社の共有フォルダ（<code>Ferry\App\Windows</code>）に新しいバージョンがあるかを確かめ、裏でダウンロードします。</p>
   <ul>
     <li>準備ができると、窓の上に「<b>新しいバージョンがあります</b>」と出ます。<b class="ui">再起動して更新</b> を押すとすぐに更新されます。</li>
     <li>押さなくても、次に Ferry を起動したときに自動で入れ替わります。</li>
-    <li>今のバージョンは左下（<b>Ferry 0.1.8</b> など）に出ています。</li>
+    <li>今のバージョンは左下（<b>Ferry 0.1.8</b> など）に出ています。バージョンの数字を押すと、その場で新しいバージョンがあるか確かめます。</li>
+    <li>Mac 版も同じように、共有フォルダ（<code>Ferry/App/Mac</code>）から更新されます。メニューの <b class="ui">Ferry</b> → <b class="ui">アップデートを確認…</b> でも確かめられます。</li>
   </ul>
   <div class="note">
     <b class="label">アンインストール</b>
@@ -412,7 +413,7 @@
   <h3>会社の共有フォルダ</h3>
   <ul>
     <li>Dropbox で「Ferry」フォルダを共有し、会社の人を招待します。接続先を追加・編集してもらう人は「編集可」、使うだけの人は「閲覧のみ」でもかまいません。</li>
-    <li>中身：<code>servers\</code>（接続先）、<code>folders.json</code>（フォルダ）、<code>passwords.vault</code>（会社のパスワード）、<code>App\Windows\</code>（インストーラーと更新）。手で編集しないでください。</li>
+    <li>中身：<code>servers\</code>（接続先）、<code>folders.json</code>（フォルダ）、<code>passwords.vault</code>（会社のパスワード）、<code>App\Windows\</code>・<code>App\Mac\</code>（インストーラーと更新）。手で編集しないでください。</li>
   </ul>
   <h3>会社のマスターパスワードを決める（最初の 1 回）</h3>
   <ol class="steps">

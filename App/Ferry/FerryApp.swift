@@ -6,11 +6,16 @@ struct FerryApp: App {
     @State private var store: ServerStore
     @State private var sessions: SessionManager
     @State private var vault: PasswordVault?
+    @State private var updater: Updater
 
     init() {
         let store = ServerStore()
         _store = State(initialValue: store)
         _sessions = State(initialValue: SessionManager(store: store))
+        // 更新は会社の共有フォルダの App/Mac から受け取る
+        let updater = Updater { [weak store] in store?.shared.directory }
+        updater.start()
+        _updater = State(initialValue: updater)
         // パスワードの同期は、自分の接続先を同期する場所（iCloud Drive・選んだフォルダ）に置いている場合だけ
         let vault = store.isSynced ? PasswordVault(directory: store.fileURL.deletingLastPathComponent()) : nil
         Passwords.vault = vault
@@ -27,11 +32,17 @@ struct FerryApp: App {
             ContentView()
                 .environment(store)
                 .environment(sessions)
+                .environment(updater)
                 .frame(minWidth: 820, minHeight: 560)
         }
         .defaultSize(width: 1280, height: 800)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button("アップデートを確認…") {
+                    Task { await updater.checkByHand() }
+                }
+            }
             CommandGroup(after: .importExport) {
                 Button("Transmit から読み込む…") { store.chooseTransmitFile() }
             }

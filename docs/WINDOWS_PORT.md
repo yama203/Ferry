@@ -124,6 +124,7 @@ Windows/
 <共有フォルダ>/servers/<ID>.json      接続先 1 件（下の形式）
 <共有フォルダ>/passwords.vault        共有の接続先のパスワード（会社のマスターパスワードで暗号化。下の「パスワード」）
 <共有フォルダ>/App/Windows/           Windows 版のインストーラーと更新（release.ps1 が置く）
+<共有フォルダ>/App/Mac/               Mac 版の Ferry.zip と version.json（release.sh が置く。下の「Mac 版の自動更新」）
 ```
 
 - 接続先 1 件につき 1 ファイルにしているのは、複数人が同時に編集しても衝突しにくくするため。
@@ -261,7 +262,13 @@ cd Windows
 - `vpk`（Velopack の CLI）は `Windows/dotnet-tools.json` のローカルツール。`dotnet tool restore` で入る。
 - パッケージ ID は **FerryApp**（インストール先は `%LOCALAPPDATA%\FerryApp`）。`Ferry` にすると設定を置いている `%LOCALAPPDATA%\Ferry` と重なり、アンインストールで設定まで消える。画面やショートカットの名前は「Ferry」。
 - 会社の人へは `FerryApp-win-Setup.exe` を案内する（共有フォルダに「はじめにお読みください.txt」も置く）。署名は無いので、初回は「詳細情報」→「実行」。
-- アプリは起動後に共有フォルダの更新を確認してダウンロードし、窓の上に「再起動して更新」を出す（押さなくても次の起動で入れ替わる）。置き場所は設定の `updateDirectory` で変えられる（無ければ `<共有フォルダ>\App\Windows`）。
+- アプリは起動後と、その後 6 時間ごとに共有フォルダの更新を確認してダウンロードし、窓の上に「再起動して更新」を出す（押さなくても次の起動で入れ替わる）。左下のバージョンを押すと、その場で確かめる。置き場所は設定の `updateDirectory` で変えられる（無ければ `<共有フォルダ>\App\Windows`）。
+
+### Mac 版の自動更新
+
+- Velopack は使わない（Sparkle も、更新の置き場所を Web に公開する必要があるので使わない）。`App/release.sh` が GitHub のリリースの後に、Mac の Ferry の設定（`defaults read com.yama.Ferry sharedDirectory`）から共有フォルダを取り、`<共有フォルダ>/App/Mac/` に `Ferry.zip`（ditto の zip）と `version.json`（`{"build":11,"version":"0.11"}`）を置く。version.json は zip の後に書く。
+- アプリ（`Support/Updater.swift`）は起動後と 6 時間ごとに version.json を読み、`build` が今の `CFBundleVersion` より大きければ zip を一時フォルダにコピーして展開する。中の `CFBundleVersion` が version.json と同じこと、署名が同じチーム（`4AU22553B4`）であることを確かめてから、「再起動して更新」を出す。メニューの「アップデートを確認…」でも確かめられる。
+- 入れ替えは、アプリの終了を待つ小さなシェルスクリプトが行う（今の Ferry.app を一時フォルダへ移し、新しいものを置き、失敗したら戻す）。「あとで」にしても、Ferry を終了したときに入れ替わる。ダウンロードしたまま（App Translocation で）動かしているときや、置き場所に書き込めないときは入れ替えない。
 - WinUI の起動の入口は `Program.cs`（Velopack の処理を最初に呼ぶため、XAML が作る Main は `DISABLE_XAML_GENERATED_MAIN` で止めている）。
 - `EnableMsixTooling` が無いと publish に `Ferry.pri` が入らず、インストール版が起動時に落ちる。
 - アイコンは `Windows\Tools\make-ico.ps1` で Mac 版の PNG から `Ferry\Assets\Ferry.ico` を作る。

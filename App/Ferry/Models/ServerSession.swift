@@ -325,6 +325,11 @@ final class SessionManager {
         sessions[id]?.close()
         sessions[id] = nil
     }
+
+    /// 終わっていない転送の数（更新のための再起動の前に確かめる）
+    var activeTransferCount: Int {
+        sessions.values.reduce(0) { $0 + $1.transfers.activeCount }
+    }
 }
 
 extension ServerConfig {

@@ -128,8 +128,11 @@
                 </Grid.ColumnDefinitions>
                 <Image Source="ms-appx:///Assets/Ferry.png" Width="20" Height="20" VerticalAlignment="Center" />
                 <TextBlock Grid.Column="1" Text="Ferry" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="2" x:Name="VersionText" FontSize="11" VerticalAlignment="Center" Margin="0,2,0,0"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                <!-- バージョン。押すと更新を確かめる -->
+                <HyperlinkButton Grid.Column="2" Padding="2,2" VerticalAlignment="Center" Margin="-2,2,0,0" Click="CheckUpdate_Click"
+                                 ToolTipService.ToolTip="アップデートを確認">
+                    <TextBlock x:Name="VersionText" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </HyperlinkButton>
                 <StackPanel Grid.Column="4" Orientation="Horizontal">
                     <Button x:Name="ICloudStatus" Style="{StaticResource PaneButtonStyle}" Click="ICloudStatus_Click" Visibility="Collapsed">
                         <FontIcon x:Name="ICloudIcon" Glyph="&#xE753;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />

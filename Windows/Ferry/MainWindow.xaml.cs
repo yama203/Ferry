@@ -464,12 +464,42 @@ public sealed partial class MainWindow : Window
 
     // MARK: 自動更新
 
+    private DispatcherTimer? _updateTimer;
+
+    /// <summary>起動したときと、その後 6 時間ごとに確かめる</summary>
     private async Task CheckForUpdateAsync()
     {
-        if (await Updater.CheckAndDownloadAsync() is not { } version) return;
-        UpdateBar.Message = $"Ferry {version} をダウンロードしました。再起動すると更新されます（次に起動したときにも自動で更新されます）。";
+        if (_updateTimer is null)
+        {
+            _updateTimer = new DispatcherTimer { Interval = Updater.CheckInterval };
+            _updateTimer.Tick += async (_, _) => await CheckForUpdateAsync();
+            _updateTimer.Start();
+        }
+        ShowUpdate(await Updater.CheckAndDownloadAsync());
+    }
+
+    private bool ShowUpdate(Updater.Result result)
+    {
+        if (result.Status != Updater.Status.Downloaded) return false;
+        UpdateBar.Message = $"Ferry {result.Version} をダウンロードしました。再起動すると更新されます（次に起動したときにも自動で更新されます）。";
         UpdateBar.IsOpen = true;
         UpdateVaultBar();
+        return true;
+    }
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        var result = await Updater.CheckAndDownloadAsync();
+        if (ShowUpdate(result)) return;
+        var (title, message) = result.Status switch
+        {
+            Updater.Status.UpToDate => ("最新です", $"Ferry {Updater.CurrentVersion} は最新のバージョンです。"),
+            Updater.Status.NoSource => ("更新を確かめられません",
+                "会社の共有フォルダを設定すると、そこ（App\\Windows）から更新を受け取れます。"),
+            Updater.Status.NotInstalled => ("更新を確かめられません", "インストールしていない（開発中の）Ferry では更新できません。"),
+            _ => ("更新を確かめられませんでした", "共有フォルダが読めるか確かめてください。くわしくは ferry.log にあります。"),
+        };
+        await Dialogs.ShowErrorAsync(XamlRootOrThrow, title, message);
     }
 
     private async void ApplyUpdate_Click(object sender, RoutedEventArgs e)
