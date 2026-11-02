@@ -121,8 +121,11 @@ Ferry for Windows $Version（$(Get-Date -Format 'yyyy-MM-dd HH:mm') に作成）
    （ARM 版の Windows では FerryApp-win-arm64-Setup.exe）
 2. 「Windows によって PC が保護されました」と出たら、「詳細情報」→「実行」を押す
 3. 以後は、Ferry がこのフォルダから自動で更新されます
+
+使い方や同期の設定は「Ferry 取り扱い説明書.pdf」を見てください。
 "@
 [IO.File]::WriteAllText((Join-Path $updateDirectory 'はじめにお読みください.txt'), $readme, (New-Object Text.UTF8Encoding($true)))
+Copy-Item (Join-Path $PSScriptRoot '..\docs\manual\Ferry 取り扱い説明書.pdf') $updateDirectory -Force
 Write-Host "☁️  $updateDirectory に置きました"
 
 # リリースノート: 前の Windows 版のタグからのコミットの 1 行目（バージョン更新のコミットは除く）

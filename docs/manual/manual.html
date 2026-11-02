@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Ferry 取り扱い説明書</title>
+<style>
+  @page { size: A4; margin: 18mm 17mm 18mm 17mm; }
+  :root {
+    --blue: #2A6FE0;
+    --blue-soft: #EAF1FD;
+    --ink: #1F2937;
+    --sub: #5B6575;
+    --line: #DCE3EE;
+    --warn: #B45309;
+    --warn-soft: #FEF5E7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "BIZ UDPGothic", "BIZ UDGothic", "Yu Gothic UI", "Meiryo", sans-serif;
+    color: var(--ink);
+    font-size: 10.5pt;
+    line-height: 1.75;
+    margin: 0;
+  }
+  h1, h2, h3 { font-weight: 700; line-height: 1.4; }
+  h2 {
+    font-size: 17pt;
+    margin: 0 0 6mm;
+    padding-bottom: 2.5mm;
+    border-bottom: 2px solid var(--blue);
+    break-before: page;
+  }
+  h2 .num { color: var(--blue); margin-right: 3mm; }
+  h3 { font-size: 12.5pt; margin: 7mm 0 2mm; padding-left: 3mm; border-left: 4px solid var(--blue); }
+  p { margin: 0 0 3mm; }
+  ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
+  li { margin-bottom: 1mm; }
+  .sub { color: var(--sub); }
+  b.ui, .ui {
+    font-weight: 700;
+    color: #0F3F99;
+    background: var(--blue-soft);
+    border-radius: 3px;
+    padding: 0 3px;
+    white-space: nowrap;
+  }
+  kbd {
+    font-family: inherit;
+    font-size: 9pt;
+    border: 1px solid #B8C2D3;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 0 5px;
+    background: #F8FAFC;
+    white-space: nowrap;
+  }
+  code { font-family: "Consolas", "BIZ UDGothic", monospace; font-size: 9.5pt; background: #F3F5F8; padding: 0 3px; border-radius: 3px; word-break: break-all; }
+
+  /* 手順 */
+  ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 0 0 4mm; }
+  ol.steps > li {
+    counter-increment: step;
+    position: relative;
+    padding: 2mm 0 2mm 11mm;
+    border-bottom: 1px dashed var(--line);
+    margin: 0;
+  }
+  ol.steps > li:last-child { border-bottom: none; }
+  ol.steps > li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 2mm;
+    width: 7mm; height: 7mm; line-height: 7mm;
+    border-radius: 50%;
+    background: var(--blue); color: white;
+    font-weight: 700; font-size: 10pt; text-align: center;
+  }
+
+  /* 囲み */
+  .note, .warn, .tip {
+    border-radius: 6px;
+    padding: 3mm 4mm;
+    margin: 3mm 0 4mm;
+    break-inside: avoid;
+  }
+  .note { background: var(--blue-soft); border-left: 4px solid var(--blue); }
+  .tip { background: #EEF8F1; border-left: 4px solid #2E9E5B; }
+  .warn { background: var(--warn-soft); border-left: 4px solid var(--warn); }
+  .note b.label, .tip b.label, .warn b.label { display: block; margin-bottom: 1mm; }
+  .warn b.label { color: var(--warn); }
+  .tip b.label { color: #1F7A45; }
+  .note b.label { color: var(--blue); }
+
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9.5pt; break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 1.8mm 2.5mm; text-align: left; vertical-align: top; }
+  th { background: #F3F6FB; font-weight: 700; white-space: nowrap; }
+  td:first-child { white-space: nowrap; }
+  table.wrap td:first-child { white-space: normal; }
+
+  /* 画面の見取り図 */
+  .layout {
+    display: grid;
+    grid-template-columns: 30% 1fr 1fr;
+    grid-template-rows: auto 1fr auto;
+    gap: 2mm;
+    border: 1.5px solid #9AA8BD;
+    border-radius: 6px;
+    padding: 2mm;
+    height: 62mm;
+    margin: 3mm 0 4mm;
+    font-size: 9pt;
+    break-inside: avoid;
+  }
+  .layout > div { border-radius: 4px; padding: 1.5mm 2mm; }
+  .layout .side { grid-row: 1 / 4; background: #F3F6FB; }
+  .layout .tool { grid-column: 2 / 4; background: #F3F6FB; }
+  .layout .local { background: white; border: 1px solid var(--line); }
+  .layout .remote { background: var(--blue-soft); border: 1px solid #C9DAF8; }
+  .layout .xfer { grid-column: 2 / 4; background: #F3F6FB; }
+  .layout b { display: block; color: #0F3F99; }
+
+  /* 表紙 */
+  .cover { height: 255mm; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+  .cover img { width: 46mm; height: 46mm; margin-bottom: 8mm; }
+  .cover h1 { font-size: 30pt; margin: 0 0 2mm; letter-spacing: 0.05em; }
+  .cover .tag { font-size: 13pt; color: var(--sub); margin-bottom: 14mm; }
+  .cover .box { border: 1px solid var(--line); border-radius: 8px; padding: 5mm 8mm; text-align: left; width: 120mm; }
+  .cover .box li { margin-bottom: 1.5mm; }
+  .cover .date { margin-top: 14mm; color: var(--sub); font-size: 9.5pt; }
+
+  .toc { list-style: none; padding: 0; font-size: 11pt; }
+  .toc li { padding: 2mm 0; border-bottom: 1px dotted var(--line); }
+  .toc .num { display: inline-block; width: 9mm; color: var(--blue); font-weight: 700; }
+  .keep { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- 表紙 -->
+<section class="cover">
+  <img src="ferry-icon.png" alt="">
+  <h1>Ferry</h1>
+  <div class="tag">FTP・FTPS・SFTP のファイル転送アプリ　取り扱い説明書（Windows 版）</div>
+  <div class="box">
+    <b>この説明書でわかること</b>
+    <ul>
+      <li>インストールのしかた</li>
+      <li>会社の接続先・パスワードを使えるようにする設定</li>
+      <li>アップロード・ダウンロード・同期など、ふだんの使い方</li>
+      <li>自分だけの接続先を、自分の他の PC と同期する方法</li>
+      <li>困ったときの対処</li>
+    </ul>
+  </div>
+  <div class="date">Ferry for Windows 0.1.8 時点</div>
+</section>
+
+<!-- 目次 -->
+<section>
+  <h2 style="break-before: page;">目次</h2>
+  <ul class="toc">
+    <li><span class="num">1</span>インストール</li>
+    <li><span class="num">2</span>最初の設定（会社の接続先とパスワード）</li>
+    <li><span class="num">3</span>画面の見かた</li>
+    <li><span class="num">4</span>サーバーにつなぐ</li>
+    <li><span class="num">5</span>ファイルを転送する</li>
+    <li><span class="num">6</span>便利な機能（プレビュー・エディタ・同期・ブックマーク）</li>
+    <li><span class="num">7</span>接続先を追加・整理する</li>
+    <li><span class="num">8</span>自分の接続先を、自分の他の PC と同期する</li>
+    <li><span class="num">9</span>アップデート</li>
+    <li><span class="num">10</span>困ったとき</li>
+    <li><span class="num">11</span>管理する人向け（共有の準備）</li>
+  </ul>
+  <div class="note">
+    <b class="label">用語</b>
+    <b>接続先</b>：サーバーにつなぐための情報（ホスト名・ユーザー名など）。<br>
+    <b>会社の共有</b>：Dropbox の共有フォルダに置いた、会社の全員で使う接続先。<br>
+    <b>マスターパスワード</b>：接続先のパスワードを暗号化して同期するための合言葉。会社用と自分用があります。
+  </div>
+</section>
+
+<!-- 1 -->
+<section>
+  <h2><span class="num">1</span>インストール</h2>
+  <p>インストーラーは、会社の Dropbox の共有フォルダ「<b>Ferry</b>」の中にあります。</p>
+  <ol class="steps">
+    <li>Dropbox で共有された「<b>Ferry</b>」フォルダに参加します（招待のメールやお知らせから「参加」）。</li>
+    <li>エクスプローラーで <code>Dropbox\…\Ferry\App\Windows</code> を開き、<b>FerryApp-win-Setup.exe</b> をダブルクリックします。</li>
+    <li>「<b>Windows によって PC が保護されました</b>」と出たら、<b class="ui">詳細情報</b> を押してから <b class="ui">実行</b> を押します。<br><span class="sub">社内向けのアプリで署名をしていないため、初回だけ出ます。</span></li>
+    <li>インストールが終わると Ferry が起動します。デスクトップとスタートメニューに「Ferry」ができます。</li>
+  </ol>
+  <div class="tip">
+    <b class="label">アップデートは自動</b>
+    一度インストールすれば、新しいバージョンは共有フォルダから自動で届きます（9 章）。
+  </div>
+  <div class="note">
+    <b class="label">必要なもの</b>
+    Windows 10 / 11（64 ビット）と Dropbox。.NET などの追加のインストールは不要です。
+  </div>
+</section>
+
+<!-- 2 -->
+<section>
+  <h2><span class="num">2</span>最初の設定（会社の接続先とパスワード）</h2>
+  <p>最初に 1 回だけ、会社の共有フォルダと、会社のパスワードを使えるようにします。</p>
+
+  <h3>会社の共有フォルダを選ぶ</h3>
+  <ol class="steps">
+    <li>左上の検索欄の右にある <b class="ui">＋</b> を押し、<b class="ui">設定…</b> を開きます。</li>
+    <li>左の <b class="ui">会社の共有</b> を選び、<b class="ui">共有フォルダを選択…</b> を押します。</li>
+    <li>Dropbox の中の共有された「<b>Ferry</b>」フォルダを選び、<b class="ui">保存</b> を押します。</li>
+  </ol>
+  <p>左のサイドバーの上に「<b>会社の共有</b>」の接続先が並べば完了です。</p>
+  <div class="warn">
+    <b class="label">選ぶのは「Ferry」フォルダそのもの</b>
+    中の <code>App</code> や <code>servers</code> フォルダではなく、その一つ上の「Ferry」フォルダを選んでください。
+  </div>
+
+  <h3>会社のパスワードを使えるようにする</h3>
+  <p>会社の接続先のパスワードは、<b>会社のマスターパスワード</b>で暗号化して共有しています。会社のマスターパスワードは、管理する人から聞いてください。</p>
+  <ol class="steps">
+    <li><b class="ui">＋</b> → <b class="ui">設定…</b> → 左の <b class="ui">パスワード</b> を開きます。<br><span class="sub">窓の上に「パスワードの同期」のお知らせが出ていれば、その <b class="ui">設定を開く</b> からでも開けます。</span></li>
+    <li>「<b>会社で同期</b>」の <b class="ui">マスターパスワード</b> の欄に会社のマスターパスワードを入れ、<b class="ui">同期する</b> を押します。</li>
+    <li>「同期しています（○件）」と出れば完了です。<b class="ui">保存</b> で閉じます。</li>
+  </ol>
+  <p>これで、会社の接続先はパスワードを入れずにつながります。入力は PC ごとに 1 回だけです。</p>
+  <div class="note">
+    <b class="label">パスワードの保管</b>
+    パスワードはこの PC の「資格情報マネージャー」に保存されます。会社の共有フォルダには、暗号化した状態でしか置かれません。
+  </div>
+</section>
+
+<!-- 3 -->
+<section>
+  <h2><span class="num">3</span>画面の見かた</h2>
+  <div class="layout">
+    <div class="side"><b>サイドバー</b>検索欄と <b style="display:inline">＋</b><br>接続先の一覧<br>（会社の共有 → 自分の接続先）<br><br><br><br><span class="sub">左下：Ferry のバージョンと同期の状態</span></div>
+    <div class="tool"><b>ツールバー</b>アップロード・ダウンロード・同期・ブックマーク・再接続・接続設定</div>
+    <div class="local"><b>この PC</b>自分の PC のフォルダ</div>
+    <div class="remote"><b>サーバー</b>接続先のフォルダ</div>
+    <div class="xfer"><b>転送一覧</b>転送中・完了したファイル（転送があるときだけ）</div>
+  </div>
+  <table>
+    <tr><th>場所</th><th>できること</th></tr>
+    <tr><td>サイドバー</td><td>接続先を選ぶとつながります。フォルダの見出しを押すと開閉します。検索欄で名前・ホスト・ユーザー名・フォルダ名から探せます（空白で区切ると「かつ」。<kbd>Enter</kbd> で最初の結果を開く）。</td></tr>
+    <tr><td>左右のペイン</td><td>左が自分の PC、右がサーバー。上のパンくず（<code>C: › Users › …</code>）で上の階層へ戻れます。列の見出し（名前・サイズ・更新日）を押すと並べ替え。間の境界線をドラッグで幅を変え、ダブルクリックで半分ずつに戻ります。</td></tr>
+    <tr><td>左下</td><td>小さな<b>雲のアイコン</b>（自分の接続先を同期中。フォルダで同期しているときは同期のアイコン）と<b>人のアイコン</b>（会社の共有）。マウスを乗せると詳しい状態、押すと設定が開きます。黄色のときはマスターパスワードの入力が必要です。</td></tr>
+  </table>
+  <h3>キーボード</h3>
+  <table>
+    <tr><th>キー</th><th>動き</th><th>キー</th><th>動き</th></tr>
+    <tr><td><kbd>Enter</kbd></td><td>開く（フォルダ・ファイル）</td><td><kbd>Space</kbd></td><td>プレビューの開閉</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>削除</td><td><kbd>F2</kbd></td><td>名前を変更</td></tr>
+    <tr><td><kbd>F5</kbd></td><td>再読み込み</td><td><kbd>Backspace</kbd> / <kbd>Alt</kbd>+<kbd>←</kbd></td><td>前のフォルダへ戻る</td></tr>
+    <tr><td><kbd>Alt</kbd>+<kbd>↑</kbd></td><td>上のフォルダへ</td><td><kbd>Ctrl</kbd> / <kbd>Shift</kbd>+クリック</td><td>複数を選ぶ</td></tr>
+  </table>
+</section>
+
+<!-- 4 -->
+<section>
+  <h2><span class="num">4</span>サーバーにつなぐ</h2>
+  <ol class="steps">
+    <li>サイドバーで接続先を選びます。右のペインに「接続しています…」と出て、つながるとサーバーのファイルが並びます。</li>
+    <li>パスワードを聞かれたら、右のペインに入力して <b class="ui">接続</b> を押します。<b class="ui">この PC に保存する</b> にチェックを入れておくと、次からは聞かれません。</li>
+  </ol>
+  <p>前回開いていた接続先は、次に Ferry を起動したときに自動で開きます。</p>
+
+  <h3>「証明書を確認できません」と出たとき</h3>
+  <p>共用サーバーなどで、証明書の名前が接続先と合わないときに出ます。接続先に間違いがなければ <b class="ui">証明書を検証せずに接続</b> を押してください（通信の暗号化はそのままです）。一度押すと次からは出ません。</p>
+
+  <h3>つながらないとき</h3>
+  <p>右のペインに理由が出ます（「ログインできませんでした」「サーバーが見つかりません」「データ接続ができませんでした」など）。<b class="ui">再試行</b> か <b class="ui">接続設定</b> から直してください。10 章もあわせて見てください。</p>
+</section>
+
+<!-- 5 -->
+<section>
+  <h2><span class="num">5</span>ファイルを転送する</h2>
+  <table>
+    <tr><th>やりたいこと</th><th>方法</th></tr>
+    <tr><td>アップロード</td><td>左（この PC）から右（サーバー）へドラッグ。エクスプローラーから右へドラッグしても OK。<br>または左で選んでツールバーの <b class="ui">アップロード</b>、右クリックの <b class="ui">アップロード</b>。</td></tr>
+    <tr><td>ダウンロード</td><td>右から左へドラッグ。右からエクスプローラーへドラッグしても OK。<br>サーバーのファイルを<b>ダブルクリック</b>、ツールバーの <b class="ui">ダウンロード</b>、右クリックの <b class="ui">ダウンロード</b>。</td></tr>
+    <tr><td>フォルダごと</td><td>フォルダを選べば中身ごと転送します（<code>.git</code> や <code>node_modules</code> など、設定の「除外」にあるものは中身からは除きます）。</td></tr>
+  </table>
+  <p>アップロード先・ダウンロード先は、反対側のペインで<b>今開いているフォルダ</b>です。</p>
+
+  <h3>同じ名前のファイルがあるとき</h3>
+  <p>まとめて 1 回だけ聞かれます。</p>
+  <table>
+    <tr><th>選択肢</th><th>動き</th></tr>
+    <tr><td>新しい場合のみ上書き</td><td>転送元の方が新しいファイルだけ上書き（ふだんはこれ）</td></tr>
+    <tr><td>すべて上書き</td><td>同じ名前のファイルはすべて上書き</td></tr>
+    <tr><td>既存のファイルはスキップ</td><td>すでにあるファイルは転送しない</td></tr>
+    <tr><td>転送をやめる</td><td>何も転送しない</td></tr>
+  </table>
+
+  <h3>転送一覧</h3>
+  <p>転送中は画面の下に一覧が出ます。✕ で中止、↻ で再試行、<b class="ui">完了した項目を消去</b> で一覧を片付けます。全部終わると Windows の通知でお知らせします（設定の「通知」で切れます）。</p>
+
+  <h3>ファイルの操作（右クリック）</h3>
+  <p><b class="ui">名前を変更…</b>　<b class="ui">パーミッション…</b>（サーバー側。755 などの数字）　<b class="ui">パスをコピー</b>　<b class="ui">削除</b>　<b class="ui">新規フォルダ…</b>　<b class="ui">エクスプローラーで表示</b>（この PC 側）</p>
+  <div class="warn">
+    <b class="label">サーバーの削除は元に戻せません</b>
+    この PC 側の削除はごみ箱に入りますが、サーバー側の削除は確認のあと完全に消えます。
+  </div>
+</section>
+
+<!-- 6 -->
+<section>
+  <h2><span class="num">6</span>便利な機能</h2>
+
+  <h3>プレビュー</h3>
+  <p>ファイルを選んで <kbd>Space</kbd>。画像・テキスト・HTML・PDF をその場で見られます。開いたまま <kbd>↑</kbd><kbd>↓</kbd> で次のファイル、もう一度 <kbd>Space</kbd> で閉じます。サーバーのファイルも見られます（50MB まで）。</p>
+
+  <h3>エディタで開いて、保存したら自動でアップロード</h3>
+  <p>サーバーのファイルを右クリック → <b class="ui">エディタで開く</b>。VS Code（入っていれば）で開き、<b>保存するたびにサーバーへアップロード</b>します。編集中のファイルはツールバーの <b class="ui">編集中</b> から、もう一度開く・監視をやめる、ができます。使うエディタは設定の「エディタ」で変えられます。</p>
+
+  <h3>同期（フォルダをまるごとそろえる）</h3>
+  <ol class="steps">
+    <li>左右のペインで、そろえたいフォルダをそれぞれ開きます。</li>
+    <li>ツールバーの <b class="ui">同期</b> を押します。真ん中の矢印で、どちらからどちらへ送るかを切り替えます。</li>
+    <li><b class="ui">比較</b> を押すと、転送するファイルの一覧（新規・変更）が出ます。チェックを外すとそのファイルは転送しません。</li>
+    <li><b class="ui">同期を実行</b> で転送します。違いが無ければ「同期済みです」と出ます。</li>
+  </ol>
+  <div class="warn">
+    <b class="label">「ミラー」に注意</b>
+    ミラーをオンにすると、<b>送信先にしか無いファイルを削除</b>します。比較の結果の「削除」を確かめてから実行してください。
+  </div>
+
+  <h3>ブックマーク</h3>
+  <p>「この PC のフォルダ」と「サーバーのフォルダ」の組み合わせを覚えておけます。開きたい場所を左右で開いて、ツールバーの <b class="ui">ブックマーク</b> → <b class="ui">今の左右の場所を追加…</b>。次からはブックマークを選ぶだけで両方がその場所を開きます。<b class="ui">接続時に開く</b> にすると、つないだときに自動で開きます。</p>
+</section>
+
+<!-- 7 -->
+<section>
+  <h2><span class="num">7</span>接続先を追加・整理する</h2>
+  <h3>追加する</h3>
+  <ol class="steps">
+    <li><b class="ui">＋</b> → <b class="ui">接続先を追加…</b></li>
+    <li>方式（FTP / FTPS / SFTP）・ホスト・ユーザー名・パスワードなどを入れて <b class="ui">保存</b>。<br><span class="sub">会社の全員で使うものは <b class="ui">会社で共有する</b> にチェックを入れます。</span></li>
+  </ol>
+  <p>FileZilla や WinSCP を使っていた人は、<b class="ui">＋</b> → <b class="ui">FileZilla から読み込む…</b> / <b class="ui">WinSCP から読み込む…</b> でまとめて取り込めます。</p>
+
+  <h3>整理する</h3>
+  <ul>
+    <li><b>フォルダ</b>：<b class="ui">＋</b> → <b class="ui">フォルダを追加…</b>（自分用）/ <b class="ui">会社の共有にフォルダを追加…</b>（会社用）。</li>
+    <li><b>移動</b>：接続先をフォルダの見出しへドラッグ、または右クリック → <b class="ui">フォルダへ移動</b>。<kbd>Ctrl</kbd>・<kbd>Shift</kbd> で複数選んでまとめて移せます。</li>
+    <li><b>共有する／やめる</b>：右クリック → <b class="ui">会社で共有する</b> / <b class="ui">自分だけの接続先にする</b>。</li>
+    <li><b>その他</b>：右クリックで <b class="ui">編集…</b>（接続設定）、<b class="ui">複製</b>、<b class="ui">削除…</b>。</li>
+  </ul>
+  <div class="warn">
+    <b class="label">会社の接続先の編集・削除は全員に反映されます</b>
+    会社の共有の接続先を変えたり消したりすると、会社の全員の一覧が変わります。ローカルのフォルダやブックマークは各自の PC ごとの設定なので、他の人には影響しません。
+  </div>
+</section>
+
+<!-- 8 -->
+<section>
+  <h2><span class="num">8</span>自分の接続先を、自分の他の PC と同期する</h2>
+  <p>自分だけの接続先（会社の共有ではないもの）は、置き場所を選ぶと、自分の他の PC（Mac 版の Ferry も）と同じ一覧になります。</p>
+  <table>
+    <tr><th>保存場所</th><th>向いている人</th></tr>
+    <tr><td>iCloud Drive</td><td>Mac も使っていて、Windows 用 iCloud を入れている人（入っていればこれが最初の設定）</td></tr>
+    <tr><td>選んだフォルダ</td><td>自分だけの Dropbox・OneDrive などのフォルダで同期したい人（<b>会社の共有フォルダとは別のフォルダ</b>を選んでください）</td></tr>
+    <tr><td>この PC だけ</td><td>同期しなくてよい人</td></tr>
+  </table>
+  <ol class="steps">
+    <li><b class="ui">＋</b> → <b class="ui">設定…</b> → 左の <b class="ui">保存場所</b>。</li>
+    <li><b class="ui">フォルダを選択…</b> / <b class="ui">iCloud Drive にする</b> / <b class="ui">この PC だけにする</b> のどれかを押し、<b class="ui">保存</b>。</li>
+    <li>「再起動しますか？」に <b class="ui">再起動</b> で切り替わります。</li>
+  </ol>
+  <p>新しい場所にまだ一覧が無ければ、今の一覧をコピーします。すでにあれば（2 台目の PC など）その一覧を使います。</p>
+
+  <h3>自分のパスワードも同期する</h3>
+  <p>設定の <b class="ui">パスワード</b> → 「<b>自分の PC の間で同期</b>」で自分用のマスターパスワードを決めて <b class="ui">同期を始める</b>。他の PC では同じマスターパスワードを入れて <b class="ui">同期する</b>。</p>
+  <div class="note">
+    <b class="label">PC ごとの設定</b>
+    「最初に開くこの PC のフォルダ」やブックマーク、秘密鍵の場所は、PC ごとに別々に覚えます（Mac と Windows ではフォルダの場所が違うため）。
+  </div>
+</section>
+
+<!-- 9 -->
+<section>
+  <h2><span class="num">9</span>アップデート</h2>
+  <p>Ferry は起動するたびに、会社の共有フォルダ（<code>Ferry\App\Windows</code>）に新しいバージョンがあるかを確かめ、裏でダウンロードします。</p>
+  <ul>
+    <li>準備ができると、窓の上に「<b>新しいバージョンがあります</b>」と出ます。<b class="ui">再起動して更新</b> を押すとすぐに更新されます。</li>
+    <li>押さなくても、次に Ferry を起動したときに自動で入れ替わります。</li>
+    <li>今のバージョンは左下（<b>Ferry 0.1.8</b> など）に出ています。</li>
+  </ul>
+  <div class="note">
+    <b class="label">アンインストール</b>
+    Windows の「設定」→「アプリ」→「インストールされているアプリ」から「Ferry」をアンインストールします。接続先の設定やパスワードは消えずに残ります。
+  </div>
+</section>
+
+<!-- 10 -->
+<section>
+  <h2><span class="num">10</span>困ったとき</h2>
+  <table class="wrap">
+    <tr><th style="width:36%">こんなとき</th><th>確かめること</th></tr>
+    <tr><td>会社の接続先でパスワードを聞かれる</td><td>設定の <b class="ui">パスワード</b> で「会社で同期」が「同期しています」になっているか（2 章）。それでも聞かれるものは、まだ誰もパスワードを保存していない接続先です。入力して <b class="ui">この PC に保存する</b> にすると、会社の同期にも入ります。</td></tr>
+    <tr><td>左下のアイコンが黄色</td><td>マスターパスワードの入力が必要です。アイコンを押して入力してください。</td></tr>
+    <tr><td>会社の接続先が出てこない</td><td>設定の <b class="ui">会社の共有</b> で Dropbox の「Ferry」フォルダが選ばれているか。Dropbox が同期中でないか。</td></tr>
+    <tr><td>一覧の表示・転送ができない（データ接続のエラー）</td><td><b class="ui">接続設定</b> の <b>パッシブモード</b> を切り替えてみる。</td></tr>
+    <tr><td>「ホスト鍵が前回と違います」</td><td>サーバーがすり替えられている可能性があるため止めています。サーバーを移転していないか、管理する人に確認してください。</td></tr>
+    <tr><td>アップデートが届かない</td><td>Dropbox の同期が終わっているか。Ferry を一度終了してから起動し直す。</td></tr>
+    <tr><td>エラーで落ちた・変な動きをした</td><td><code>%LOCALAPPDATA%\Ferry\ferry.log</code> にエラーの記録が残ります。管理する人に送ってください。</td></tr>
+  </table>
+</section>
+
+<!-- 11 -->
+<section>
+  <h2><span class="num">11</span>管理する人向け（共有の準備）</h2>
+  <h3>会社の共有フォルダ</h3>
+  <ul>
+    <li>Dropbox で「Ferry」フォルダを共有し、会社の人を招待します。接続先を追加・編集してもらう人は「編集可」、使うだけの人は「閲覧のみ」でもかまいません。</li>
+    <li>中身：<code>servers\</code>（接続先）、<code>folders.json</code>（フォルダ）、<code>passwords.vault</code>（会社のパスワード）、<code>App\Windows\</code>（インストーラーと更新）。手で編集しないでください。</li>
+  </ul>
+  <h3>会社のマスターパスワードを決める（最初の 1 回）</h3>
+  <ol class="steps">
+    <li>設定の <b class="ui">パスワード</b> → 「<b>会社で同期</b>」に、会社のマスターパスワードを 2 回入れて <b class="ui">同期を始める</b>。</li>
+    <li>その PC（Mac 版も含む）に保存してあった、共有の接続先のパスワードがまとめて入ります。足りないものは後から <b class="ui">保存してあるパスワードを同期に追加</b> で追加できます。</li>
+    <li>会社のマスターパスワードを会社の人に伝えます（メールやチャットに残さない方法で）。</li>
+  </ol>
+  <div class="warn">
+    <b class="label">マスターパスワードを忘れると</b>
+    同期したパスワードは読み出せなくなります（各 PC に保存済みのパスワードは残ります）。安全な場所に控えてください。会社のマスターパスワードを知っている人は、共有の接続先のパスワードをすべて使えます。
+  </div>
+  <h3>Mac 版</h3>
+  <p>Mac 版の Ferry も同じ共有フォルダ・同じ形式を使います。Mac 版の「設定」にも <b>会社の共有</b>・<b>保存場所</b>・<b>パスワード同期</b>・<b>会社のパスワード</b> があり、手順は同じです。</p>
+</section>
+
+</body>
+</html>

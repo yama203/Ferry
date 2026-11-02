@@ -49,7 +49,7 @@
             <ToggleSwitch x:Name="PassiveSwitch" Header="パッシブモード" OnContent="オン" OffContent="オフ" IsOn="True" />
             <ToggleSwitch x:Name="VerifySwitch" Header="サーバーの証明書を検証する" OnContent="する" OffContent="しない（自己署名など）" IsOn="True" />
 
-            <CheckBox x:Name="SharedCheck" Content="会社で共有する（共有フォルダに保存。パスワードは共有しません）" Checked="SharedCheck_Changed" Unchecked="SharedCheck_Changed" />
+            <CheckBox x:Name="SharedCheck" Content="会社で共有する（共有フォルダに保存。パスワードは会社のパスワードの同期を使っていれば共有）" Checked="SharedCheck_Changed" Unchecked="SharedCheck_Changed" />
             <ComboBox x:Name="FolderBox" Header="サイドバーのフォルダ" HorizontalAlignment="Stretch" DisplayMemberPath="Name" />
         </StackPanel>
     </ScrollViewer>
