@@ -179,13 +179,14 @@ final class Updater {
         }
         do {
             try run("/usr/bin/codesign", ["--verify", "--deep", "--strict",
-                                          #"-R=anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#,
+                                          // 同じ証明書で署名した別のアプリと入れ替わらないよう、識別子も確かめる
+                                          #"-R=identifier "com.yama.Ferry" and anchor apple generic and certificate leaf[subject.OU] = "\#(teamID)""#,
                                           app.path])
         } catch {
             throw UpdateError("共有フォルダの Ferry.app の署名を確かめられませんでした。\n\(error.localizedDescription)")
         }
         // ダウンロードした印が付いていると、開くときに止められるので外す
-        try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
+        _ = try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
         return app
     }
 

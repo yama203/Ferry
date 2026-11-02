@@ -55,4 +55,20 @@ public class PersonalLocationTests
         Assert.True(PersonalLocation.PrepareMove(from, to));
         Assert.Equal("servers", File.ReadAllText(to.ServersPath));
     }
+
+    [Fact]
+    public void 会社の共有フォルダとその中は保存場所にできない()
+    {
+        using var temp = new TempDirectory();
+        var shared = temp.Combine("Dropbox", "会社");
+        PersonalLocation Folder(string path) => new(PersonalLocation.LocationKind.Folder, path);
+
+        Assert.True(Folder(shared).IsInside(shared));
+        Assert.True(Folder(shared + Path.DirectorySeparatorChar).IsInside(shared));
+        Assert.True(Folder(Path.Combine(shared, "自分")).IsInside(shared));
+        // 名前が似ているだけの隣のフォルダや、共有フォルダを含む親は大丈夫
+        Assert.False(Folder(temp.Combine("Dropbox", "会社2")).IsInside(shared));
+        Assert.False(Folder(temp.Combine("Dropbox")).IsInside(shared));
+        Assert.False(Folder(shared).IsInside(null));
+    }
 }

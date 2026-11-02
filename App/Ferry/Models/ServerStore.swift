@@ -45,6 +45,15 @@ enum PersonalLocation: Equatable {
 
     var isSynced: Bool { self != .local }
 
+    /// 会社の共有フォルダ（またはその中）か。自分の一覧が会社の全員に見え、
+    /// パスワードの保管庫も会社のもの（同じ passwords.vault）と重なるので、保存場所にはさせない
+    func isInside(_ sharedDirectory: URL?) -> Bool {
+        guard let sharedDirectory else { return false }
+        let path = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        let shared = sharedDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        return path == shared || path.hasPrefix(shared + "/")
+    }
+
     var displayName: String {
         switch self {
         case .iCloud: "iCloud Drive（他の Mac・Windows と同期）"

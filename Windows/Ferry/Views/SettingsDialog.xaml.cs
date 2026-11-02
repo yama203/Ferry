@@ -157,6 +157,15 @@ public sealed partial class SettingsDialog : ContentDialog
     private void Save_Click(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
         var store = AppServices.Store;
+        // 自分の保存場所を会社の共有フォルダ（またはその中）にはさせない（どちらを変えた場合も）
+        if (_storage.IsInside(_sharedDirectory))
+        {
+            args.Cancel = true;
+            const string problem = "自分の接続先の保存場所と会社の共有フォルダを重ねられません。自分の接続先が会社の全員に見えてしまいます。";
+            if (_storage != AppServices.Personal) StorageText.Text = problem;
+            else SharedPathText.Text = problem;
+            return;
+        }
         if (_sharedDirectory != store.Shared.DirectoryPath)
         {
             try

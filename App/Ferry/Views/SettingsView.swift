@@ -200,6 +200,10 @@ private struct StorageSettings: View {
     }
 
     private func change(to location: PersonalLocation) {
+        if location.isInside(store.shared.directory) {
+            message = "会社の共有フォルダ（またはその中）は選べません。自分の接続先が会社の全員に見えてしまいます。"
+            return
+        }
         do {
             let usedExisting = try location.makeCurrent(movingFrom: store.location)
             message = usedExisting
@@ -386,6 +390,7 @@ private struct PasswordSyncSettings: View {
 private struct SharedSettings: View {
     @Environment(ServerStore.self) private var store
     @State private var confirmingStop = false
+    @State private var message: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -420,6 +425,11 @@ private struct SharedSettings: View {
                         .buttonStyle(.borderedProminent)
                 }
             }
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
         }
         .padding()
@@ -438,6 +448,12 @@ private struct SharedSettings: View {
         panel.canCreateDirectories = true
         panel.prompt = "このフォルダを使う"
         if panel.runModal() == .OK, let url = panel.url {
+            // 保存場所を変えて再起動を待っているときは、次の場所（current）も見る
+            if store.location.isInside(url) || PersonalLocation.current.isInside(url) {
+                message = "自分の接続先の保存場所（またはそれを含むフォルダ）は選べません。自分の接続先が会社の全員に見えてしまいます。"
+                return
+            }
+            message = nil
             store.shared.setDirectory(url)
         }
     }

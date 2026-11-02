@@ -80,6 +80,19 @@ public sealed record PersonalLocation(PersonalLocation.LocationKind Kind, string
         _ => "この PC だけ（同期しない）",
     };
 
+    /// <summary>
+    /// 会社の共有フォルダ（またはその中）か。自分の一覧が会社の全員に見え、
+    /// パスワードの保管庫も会社のもの（同じ passwords.vault）と重なるので、保存場所にはさせない
+    /// </summary>
+    public bool IsInside(string? sharedDirectory)
+    {
+        if (string.IsNullOrEmpty(sharedDirectory)) return false;
+        var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Directory));
+        var shared = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sharedDirectory));
+        return string.Equals(path, shared, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(shared + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool SamePath(string a, string b) =>
         string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
 }
