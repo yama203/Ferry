@@ -214,6 +214,7 @@ sealed = AES-256-GCM の combined 形式（nonce 12 バイト + 暗号文 + タ�
 - 社内向けなので、コード署名は無し（初回に「Windows によって PC が保護されました」→「詳細情報」→「実行」）。
 - GitHub のリポジトリは非公開なので、会社の人は GitHub からはダウンロードできない。**Velopack のインストーラーと更新ファイルを Dropbox の共有フォルダ（例: `<共有フォルダ>/App/Windows/`）に置き**、Ferry がそこから自動更新する。GitHub のリリースにも同じものを置く。
 - 64 ビット（x64）を基本に、ARM 版 Windows を使う人がいれば arm64 も作る。
+- **更新の署名**: 共有フォルダに書き込める人なら誰でも更新を置けてしまうので、`release.ps1` が更新の一覧（`releases.<チャンネル>.json`）に署名し（`.sig`、ECDSA P-256 + SHA-256、`Ferry.Core/ReleaseSignature.cs`、`Tools/ReleaseSigner`）、Ferry は組み込んだ公開鍵（`Ferry/release-public-key.txt`）で確かめてから使う。一覧には各パッケージの SHA-256 があり、Velopack がダウンロードしたフル版・差分版をそれと照合するので、一覧の署名でパッケージも守られる。秘密鍵は開発する PC の `%LOCALAPPDATA%\Ferry\release-signing-key.pem` だけに置き、自分だけの場所にバックアップする（失くすと配った Ferry は各自で入れ直し）。Mac 版は、更新の Ferry.app の署名（チーム ID と識別子 `com.yama.Ferry`）を確かめる。
 
 ## 見た目
 
