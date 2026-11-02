@@ -90,13 +90,17 @@ struct ServerSidebar: View {
                     folderHeader(folder, shared: true)
                 }
             }
-            Section {
-                rows(for: store.servers(inFolder: nil, shared: true))
-            } header: {
-                Label(store.shared.folders.isEmpty ? "会社の共有" : "会社の共有・フォルダなし", systemImage: "person.2")
-                    .dropDestination(for: String.self) { ids, _ in
-                        moveServers(ids, to: nil, shared: true)
-                    }
+            // 「フォルダなし」は 1 件も無ければ出さない（フォルダが無いときは「会社の共有」の見出しなので出す）
+            let unfiled = store.servers(inFolder: nil, shared: true)
+            if store.shared.folders.isEmpty || !unfiled.isEmpty {
+                Section {
+                    rows(for: unfiled)
+                } header: {
+                    Label(store.shared.folders.isEmpty ? "会社の共有" : "会社の共有・フォルダなし", systemImage: "person.2")
+                        .dropDestination(for: String.self) { ids, _ in
+                            moveServers(ids, to: nil, shared: true)
+                        }
+                }
             }
         }
         ForEach(store.personalFolders) { folder in
@@ -106,13 +110,16 @@ struct ServerSidebar: View {
                 folderHeader(folder, shared: false)
             }
         }
-        Section {
-            rows(for: store.servers(inFolder: nil, shared: false))
-        } header: {
-            Text(store.personalFolders.isEmpty ? (store.shared.isEnabled ? "自分の接続先" : "接続先") : "フォルダなし")
-                .dropDestination(for: String.self) { ids, _ in
-                    moveServers(ids, to: nil, shared: false)
-                }
+        let personalUnfiled = store.servers(inFolder: nil, shared: false)
+        if store.personalFolders.isEmpty || !personalUnfiled.isEmpty {
+            Section {
+                rows(for: personalUnfiled)
+            } header: {
+                Text(store.personalFolders.isEmpty ? (store.shared.isEnabled ? "自分の接続先" : "接続先") : "フォルダなし")
+                    .dropDestination(for: String.self) { ids, _ in
+                        moveServers(ids, to: nil, shared: false)
+                    }
+            }
         }
     }
 

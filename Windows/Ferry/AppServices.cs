@@ -15,6 +15,18 @@ public static class AppServices
 
     /// <summary>保管庫の状態が変わったとき（UI スレッドとは限らない）</summary>
     public static event EventHandler? VaultsChanged;
+    /// <summary>接続できなかった接続先の一覧が変わったとき（UI スレッド）</summary>
+    public static event EventHandler? ConnectionProblemsChanged;
+
+    /// <summary>接続できなかった理由を覚える（null で消す）。次に起動したときもサイドバーに印が出る</summary>
+    public static void SetConnectionProblem(Guid id, string? problem)
+    {
+        var problems = Settings.ConnectionProblems;
+        if (problem is null ? !problems.Remove(id) : problems.TryGetValue(id, out var old) && old == problem) return;
+        if (problem is not null) problems[id] = problem;
+        Settings.Save();
+        ConnectionProblemsChanged?.Invoke(null, EventArgs.Empty);
+    }
 
     private const string PersonalVaultKey = "vault-key";
     private const string SharedVaultKey = "shared-vault-key";

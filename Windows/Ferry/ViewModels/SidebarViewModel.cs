@@ -21,12 +21,15 @@ public sealed partial class SidebarRow : ObservableObject
     public bool AcceptsDrop { get; init; }
     public bool IsExpanded { get; init; } = true;
     public ServerConfig? Server { get; init; }
+    /// <summary>最後に接続できなかった理由（無ければ null）</summary>
+    public string? Problem { get; init; }
+    public bool HasProblem => Problem is not null;
 
     /// <summary>表示が同じか（一覧を作り直すとき、同じ行はそのまま残してスクロール位置や選択を保つ）</summary>
     public bool SameAs(SidebarRow other) =>
         IsHeader == other.IsHeader && Title == other.Title && Subtitle == other.Subtitle && IsShared == other.IsShared
         && FolderId == other.FolderId && IsFolder == other.IsFolder && AcceptsDrop == other.AcceptsDrop
-        && IsExpanded == other.IsExpanded && Equals(Server, other.Server);
+        && IsExpanded == other.IsExpanded && Equals(Server, other.Server) && Problem == other.Problem;
 
     public string ChevronGlyph => IsExpanded ? "" : "";
     public string ServerGlyph => IsShared ? "" : "";
@@ -89,23 +92,32 @@ public sealed partial class SidebarViewModel : ObservableObject
                 {
                     AddFolder(rows, folder, shared: true);
                 }
-                rows.Add(new SidebarRow
+                // 「フォルダなし」は 1 件も無ければ出さない（フォルダが無いときは「会社の共有」の見出しなので出す）
+                var unfiled = Sorted(store.ServersInFolder(null, shared: true));
+                if (store.Shared.Folders.Count == 0 || unfiled.Count > 0)
                 {
-                    IsHeader = true, IsShared = true, AcceptsDrop = true,
-                    Title = store.Shared.Folders.Count == 0 ? "会社の共有" : "会社の共有・フォルダなし",
-                });
-                rows.AddRange(Sorted(store.ServersInFolder(null, shared: true)).Select(s => ServerRow(s, true)));
+                    rows.Add(new SidebarRow
+                    {
+                        IsHeader = true, IsShared = true, AcceptsDrop = true,
+                        Title = store.Shared.Folders.Count == 0 ? "会社の共有" : "会社の共有・フォルダなし",
+                    });
+                    rows.AddRange(unfiled.Select(s => ServerRow(s, true)));
+                }
             }
             foreach (var folder in store.PersonalFolders)
             {
                 AddFolder(rows, folder, shared: false);
             }
-            rows.Add(new SidebarRow
+            var personalUnfiled = Sorted(store.ServersInFolder(null, shared: false));
+            if (store.PersonalFolders.Count == 0 || personalUnfiled.Count > 0)
             {
-                IsHeader = true, AcceptsDrop = true,
-                Title = store.PersonalFolders.Count > 0 ? "フォルダなし" : store.Shared.IsEnabled ? "自分の接続先" : "接続先",
-            });
-            rows.AddRange(Sorted(store.ServersInFolder(null, shared: false)).Select(s => ServerRow(s, false)));
+                rows.Add(new SidebarRow
+                {
+                    IsHeader = true, AcceptsDrop = true,
+                    Title = store.PersonalFolders.Count > 0 ? "フォルダなし" : store.Shared.IsEnabled ? "自分の接続先" : "接続先",
+                });
+                rows.AddRange(personalUnfiled.Select(s => ServerRow(s, false)));
+            }
         }
 
         ApplyRows(rows);
@@ -146,6 +158,7 @@ public sealed partial class SidebarViewModel : ObservableObject
         IsShared = shared,
         Title = server.Name,
         Subtitle = string.IsNullOrEmpty(server.Username) ? server.Host : $"{server.Username}@{server.Host}",
+        Problem = AppServices.Settings.ConnectionProblems.GetValueOrDefault(server.Id),
     };
 
     private static List<ServerConfig> Sorted(IEnumerable<ServerConfig> servers) =>

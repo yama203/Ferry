@@ -313,6 +313,24 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         }
     }
 
+    /// <summary>接続できたか・できなかったかをサイドバーの印に反映する</summary>
+    partial void OnStatusChanged(SessionStatus value)
+    {
+        switch (value)
+        {
+            case SessionStatus.Connected:
+                AppServices.SetConnectionProblem(Server.Id, null);
+                break;
+            case SessionStatus.Failed:
+                AppServices.SetConnectionProblem(Server.Id, StatusMessage);
+                break;
+            // パスワードを保存していないだけのときは印を出さない（ログインに失敗したときだけ理由がある）
+            case SessionStatus.NeedsPassword when StatusMessage is not null:
+                AppServices.SetConnectionProblem(Server.Id, $"ログインできませんでした（パスワードが変わったかもしれません）。{StatusMessage}");
+                break;
+        }
+    }
+
     private void Fail(string? message)
     {
         StatusMessage = message ?? "接続できませんでした。";

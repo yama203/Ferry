@@ -102,6 +102,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <FontIcon Glyph="{x:Bind ServerGlyph}" FontSize="15" Foreground="{ThemeResource FerryBlueBrush}" />
                                 <StackPanel Grid.Column="1">
@@ -109,6 +110,10 @@
                                     <TextBlock Text="{x:Bind Subtitle}" FontSize="11" TextTrimming="CharacterEllipsis"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
+                                <!-- 最後に接続できなかった（理由はマウスを乗せると出る） -->
+                                <FontIcon Grid.Column="2" Glyph="&#xE7BA;" FontSize="13" Margin="0,0,4,0" VerticalAlignment="Center"
+                                          Visibility="{x:Bind HasProblem}" ToolTipService.ToolTip="{x:Bind Problem}"
+                                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                             </Grid>
                         </Grid>
                     </DataTemplate>

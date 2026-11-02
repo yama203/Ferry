@@ -25,6 +25,8 @@ public sealed class AppSettings
     public string? UpdateDirectory { get; set; }
     /// <summary>転送・同期が終わったら通知する</summary>
     public bool NotifyOnComplete { get; set; } = true;
+    /// <summary>最後に接続できなかった接続先と、その理由（サイドバーに印を出す。接続できたら消す）</summary>
+    public Dictionary<Guid, string> ConnectionProblems { get; set; } = [];
 
     public static string DefaultPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ferry", "settings.json");

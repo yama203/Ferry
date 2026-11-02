@@ -34,6 +34,11 @@ public sealed partial class MainWindow : Window
 
         Sidebar.Rebuild();
         AppServices.Store.Changed += (_, _) => AppServices.OnUi(OnStoreChanged);
+        AppServices.ConnectionProblemsChanged += (_, _) =>
+        {
+            Sidebar.Rebuild();
+            SelectCurrentRow();
+        };
         AppServices.VaultsChanged += (_, _) => AppServices.OnUi(() =>
         {
             UpdateVaultBar();
