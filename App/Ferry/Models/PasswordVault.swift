@@ -242,6 +242,11 @@ enum Passwords {
         isShared(id) ? sharedVault : vault
     }
 
+    /// 保存してあるパスワード（password(for:) と違い、保管庫への追加はしない）
+    static func storedPassword(for id: UUID) -> String? {
+        (isShared(id) ? sharedVault?.password(for: id) : nil) ?? vault?.password(for: id) ?? Keychain.password(for: id)
+    }
+
     static func password(for id: UUID) -> String? {
         if isShared(id), let synced = sharedVault?.password(for: id) {
             return synced
