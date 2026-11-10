@@ -54,6 +54,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -82,6 +83,9 @@
                 <Button Style="{StaticResource PaneButtonStyle}" Click="Refresh_Click" ToolTipService.ToolTip="再読み込み（F5）">
                     <FontIcon Glyph="&#xE72C;" FontSize="14" />
                 </Button>
+                <Button Style="{StaticResource PaneButtonStyle}" Click="Filter_Click" ToolTipService.ToolTip="名前で絞り込む（Ctrl+F）">
+                    <FontIcon Glyph="&#xE721;" FontSize="14" />
+                </Button>
                 <Button Style="{StaticResource PaneButtonStyle}" ToolTipService.ToolTip="その他">
                     <FontIcon Glyph="&#xE712;" FontSize="14" />
                     <Button.Flyout>
@@ -109,9 +113,12 @@
                        ItemClicked="Breadcrumb_ItemClicked" />
         <!-- 項目のテンプレートは使わない（幅が足りないときの「…」の項目に null が渡されて x:Bind が落ちるため）。表示は Crumb.ToString -->
 
+        <!-- 名前での絞り込み（普段は閉じておき、虫眼鏡のボタンか Ctrl+F で開く） -->
+        <TextBox Grid.Row="2" x:Name="FilterBox" Visibility="Collapsed" Margin="12,0,12,6" PlaceholderText="名前で絞り込む（空白で区切って複数の語）"
+                 TextChanged="FilterBox_TextChanged" PreviewKeyDown="FilterBox_PreviewKeyDown" />
 
         <!-- 列の見出し（押すと並べ替え） -->
-        <Grid Grid.Row="2" Padding="16,0,16,2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,1">
+        <Grid Grid.Row="3" Padding="16,0,16,2" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="90" />
@@ -127,15 +134,19 @@
         </Grid>
 
         <!-- 一覧 -->
-        <ListView Grid.Row="3" x:Name="List" SelectionMode="Extended" ItemsSource="{x:Bind ViewModel.VisibleEntries, Mode=OneWay}"
+        <ListView Grid.Row="4" x:Name="List" SelectionMode="Extended" ItemsSource="{x:Bind ViewModel.VisibleEntries, Mode=OneWay}"
                   DoubleTapped="List_DoubleTapped" KeyDown="List_KeyDown" PreviewKeyDown="List_PreviewKeyDown" ContextRequested="List_ContextRequested"
                   SelectionChanged="List_SelectionChanged" Padding="0,2"
                   CanDragItems="True" DragItemsStarting="List_DragItemsStarting"
                   AllowDrop="True" DragOver="List_DragOver" Drop="List_Drop" />
-        <ProgressBar Grid.Row="3" IsIndeterminate="True" VerticalAlignment="Top" Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+        <ProgressBar Grid.Row="4" IsIndeterminate="True" VerticalAlignment="Top" Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay}" />
+        <!-- 絞り込みで 1 件も合わないとき（一覧へのドロップを邪魔しないよう、押せないようにする） -->
+        <TextBlock Grid.Row="4" Text="{x:Bind ViewModel.NoMatchesText, Mode=OneWay}" Visibility="{x:Bind ViewModel.HasNoMatches, Mode=OneWay}"
+                   IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,24" TextWrapping="Wrap"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
         <!-- 下: エラーと件数 -->
-        <StackPanel Grid.Row="4">
+        <StackPanel Grid.Row="5">
             <InfoBar Severity="Error" IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}" Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
                      CloseButtonClick="ErrorBar_Closed" Margin="8,0,8,4" />
             <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" FontSize="12" Margin="14,4,14,8"

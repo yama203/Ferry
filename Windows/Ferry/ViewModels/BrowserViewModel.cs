@@ -45,12 +45,18 @@ public sealed partial class BrowserViewModel : ObservableObject
     [ObservableProperty]
     public partial bool Ascending { get; set; } = true;
 
+    /// <summary>名前での絞り込み（空白区切りの語をすべて含むもの。今の一覧の中だけで、サーバーには問い合わせない）</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFiltering))]
+    public partial string FilterText { get; set; } = "";
+
     /// <summary>
-    /// 表示する一覧（フォルダが先、その中で選択中の並び順）。
-    /// 選択を変えるたびに並べ替えると重いので、中身や並び順が変わったときだけ作り直す。
+    /// 表示する一覧（フォルダが先、その中で選択中の並び順。絞り込み中は合うものだけ）。
+    /// 選択を変えるたびに並べ替えると重いので、中身や並び順・絞り込みが変わったときだけ作り直す。
+    /// 作り直すと一覧の選択は外れるので、絞り込みで見えなくなった項目が選ばれたままになることはない。
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(StatusText))]
+    [NotifyPropertyChangedFor(nameof(StatusText), nameof(HasNoMatches), nameof(NoMatchesText))]
     public partial IReadOnlyList<FileEntry> VisibleEntries { get; private set; } = [];
 
     [ObservableProperty]
@@ -62,6 +68,8 @@ public sealed partial class BrowserViewModel : ObservableObject
     public partial int HistoryCount { get; private set; }
 
     private IReadOnlyList<FileEntry> _entries = [];
+    /// <summary>絞り込む前の件数（隠しファイルの表示は反映したもの）</summary>
+    private int _unfilteredCount;
     private readonly Stack<string> _history = new();
 
     public BrowserViewModel(PaneSide side, bool showHidden)
@@ -79,9 +87,24 @@ public sealed partial class BrowserViewModel : ObservableObject
         ? (Path == "/" ? "/" : RemotePath.Name(Path))
         : Path.Length == 0 ? "この PC" : LocalName(Path);
 
-    public string StatusText => SelectedCount > 0
-        ? $"{VisibleEntries.Count} 項目中 {SelectedCount} 項目を選択"
-        : $"{VisibleEntries.Count} 項目";
+    public bool IsFiltering => NameFilter.IsActive(FilterText);
+
+    /// <summary>絞り込みで 1 件も合わない（空の一覧ではなく、そう案内する）</summary>
+    public bool HasNoMatches => IsFiltering && VisibleEntries.Count == 0;
+
+    public string NoMatchesText => HasNoMatches ? $"「{FilterText.Trim()}」に合う項目はありません" : "";
+
+    public string StatusText
+    {
+        get
+        {
+            var shown = IsFiltering
+                ? $"{_unfilteredCount} 項目中 {VisibleEntries.Count} 項目を表示"
+                : $"{VisibleEntries.Count} 項目";
+            if (SelectedCount == 0) return shown;
+            return IsFiltering ? $"{shown}（{SelectedCount} 項目を選択）" : $"{VisibleEntries.Count} 項目中 {SelectedCount} 項目を選択";
+        }
+    }
 
     public IReadOnlyList<Crumb> Breadcrumbs
     {
@@ -115,6 +138,7 @@ public sealed partial class BrowserViewModel : ObservableObject
     partial void OnShowHiddenChanged(bool value) => UpdateVisibleEntries();
     partial void OnSortKeyChanged(SortKey value) => UpdateVisibleEntries();
     partial void OnAscendingChanged(bool value) => UpdateVisibleEntries();
+    partial void OnFilterTextChanged(string value) => UpdateVisibleEntries();
 
     /// <summary>列の見出しを押したとき。同じ列なら向きを変える。</summary>
     public void SortBy(SortKey key)
@@ -132,9 +156,13 @@ public sealed partial class BrowserViewModel : ObservableObject
 
     private void UpdateVisibleEntries()
     {
-        var shown = ShowHidden ? _entries : _entries.Where(e => !e.IsHidden);
-        var folders = shown.Where(e => e.IsDirectory).ToList();
-        var files = shown.Where(e => !e.IsDirectory).ToList();
+        var shown = (ShowHidden ? _entries : _entries.Where(e => !e.IsHidden)).ToList();
+        _unfilteredCount = shown.Count;
+        // 絞り込みは隠しファイルの表示を反映した後（フォルダも対象）
+        var terms = NameFilter.Terms(FilterText);
+        IEnumerable<FileEntry> matched = terms.Length == 0 ? shown : shown.Where(e => NameFilter.Matches(e.Name, terms));
+        var folders = matched.Where(e => e.IsDirectory).ToList();
+        var files = matched.Where(e => !e.IsDirectory).ToList();
         folders.Sort(Compare);
         files.Sort(Compare);
         VisibleEntries = [.. folders, .. files];
@@ -166,9 +194,12 @@ public sealed partial class BrowserViewModel : ObservableObject
                 _history.Push(Path);
                 HistoryCount = _history.Count;
             }
+            // 別のフォルダへ移ったら絞り込みをやめる（再読み込みではそのまま）
+            var moved = Path != newPath;
             Path = newPath;
             _entries = loaded;
-            UpdateVisibleEntries();
+            if (moved && FilterText.Length > 0) FilterText = "";
+            else UpdateVisibleEntries();
             ErrorMessage = null;
         }
         catch (Exception e)

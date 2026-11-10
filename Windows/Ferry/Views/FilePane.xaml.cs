@@ -39,11 +39,26 @@ public sealed partial class FilePane : UserControl
         }
         viewModel.PropertyChanged += ViewModel_PropertyChanged;
         UpdateSortHeaders();
+        // Ctrl+F はフォーカスのあるペインだけで受ける（一覧や入力欄が処理済みにしたものも）
+        AddHandler(KeyDownEvent, new KeyEventHandler(Pane_KeyDown), true);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(BrowserViewModel.SortKey) or nameof(BrowserViewModel.Ascending)) UpdateSortHeaders();
+        switch (e.PropertyName)
+        {
+            case nameof(BrowserViewModel.SortKey) or nameof(BrowserViewModel.Ascending):
+                UpdateSortHeaders();
+                break;
+            case nameof(BrowserViewModel.FilterText):
+                // 別のフォルダへ移って絞り込みが解除されたとき（入力欄は開いたまま空にする）
+                if (FilterBox.Text != ViewModel.FilterText) FilterBox.Text = ViewModel.FilterText;
+                break;
+            case nameof(BrowserViewModel.VisibleEntries):
+                // 一覧を作り直すと選択が外れるので、件数の表示を合わせる（一覧に反映された後で数える）
+                DispatcherQueue.TryEnqueue(() => ViewModel.SelectedCount = List.SelectedItems.Count);
+                break;
+        }
     }
 
     private void UpdateSortHeaders()
@@ -75,6 +90,65 @@ public sealed partial class FilePane : UserControl
     private void SortDate_Click(object sender, RoutedEventArgs e) => ViewModel.SortBy(SortKey.Date);
 
     private void ErrorBar_Closed(InfoBar sender, object args) => ViewModel.ErrorMessage = null;
+
+    // MARK: 絞り込み
+
+    private void Filter_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilterBox.Visibility == Visibility.Visible) CloseFilter();
+        else OpenFilter();
+    }
+
+    private void Pane_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.F) return;
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+        if (!ctrl) return;
+        e.Handled = true;
+        OpenFilter();
+    }
+
+    /// <summary>入力欄を開いて、入力できるようにする（開いていれば中身を選ぶ）</summary>
+    private void OpenFilter()
+    {
+        FilterBox.Visibility = Visibility.Visible;
+        // 表示したばかりの入力欄にはすぐにフォーカスを移せないことがあるので、描画の後に移す
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            FilterBox.Focus(FocusState.Keyboard);
+            FilterBox.SelectAll();
+        });
+    }
+
+    /// <summary>絞り込みをやめて入力欄を閉じ、一覧にフォーカスを戻す</summary>
+    private void CloseFilter()
+    {
+        FilterBox.Text = "";
+        ViewModel.FilterText = "";
+        FilterBox.Visibility = Visibility.Collapsed;
+        FocusList();
+    }
+
+    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) => ViewModel.FilterText = FilterBox.Text;
+
+    /// <summary>Esc で閉じる。↓ と Enter で一覧へ（入力欄が ↓ を使う前に受け取る）</summary>
+    private void FilterBox_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case VirtualKey.Escape:
+                e.Handled = true;
+                CloseFilter();
+                break;
+            case VirtualKey.Down:
+            case VirtualKey.Enter:
+                e.Handled = true;
+                if (List.SelectedItems.Count == 0 && ViewModel.VisibleEntries.Count > 0) List.SelectedIndex = 0;
+                FocusList();
+                break;
+        }
+    }
 
     private void PaneMenu_Opening(object sender, object e)
     {
@@ -197,6 +271,10 @@ public sealed partial class FilePane : UserControl
             case VirtualKey.Up when alt:
                 e.Handled = true;
                 await ViewModel.GoUpAsync();
+                break;
+            case VirtualKey.Escape when FilterBox.Visibility == Visibility.Visible:
+                e.Handled = true;
+                CloseFilter();
                 break;
         }
     }
