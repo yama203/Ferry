@@ -18,13 +18,23 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="{x:Bind ViewModel.Title, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Text="{x:Bind ViewModel.Subtitle, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
-            <CommandBar Grid.Column="1" DefaultLabelPosition="Right" Background="Transparent" IsDynamicOverflowEnabled="True">
+            <!-- 暗号化なしの FTP でつないでいるときの印。押すと FTPS に切り替えられるかを調べる -->
+            <Button x:Name="FtpsHintButton" Grid.Column="1" Style="{StaticResource PaneButtonStyle}" Padding="6,3" VerticalAlignment="Center"
+                    Click="FtpsHint_Click" Visibility="{x:Bind ViewModel.ShowFtpsHint, Mode=OneWay}"
+                    ToolTipService.ToolTip="パスワードもファイルの中身も、暗号化されずに流れています。押すと、FTPS（暗号化）に切り替えられるかを調べます。">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <FontIcon Glyph="&#xE785;" FontSize="12" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                    <TextBlock x:Name="FtpsHintText" Text="暗号化されていません" FontSize="12" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                </StackPanel>
+            </Button>
+            <CommandBar Grid.Column="2" DefaultLabelPosition="Right" Background="Transparent" IsDynamicOverflowEnabled="True">
                 <AppBarButton Label="アップロード" Click="Upload_Click" IsEnabled="{x:Bind ViewModel.IsConnected, Mode=OneWay}"
                               ToolTipService.ToolTip="左で選んだ項目を、サーバー側で開いているフォルダへ">
                     <AppBarButton.Icon><FontIcon Glyph="&#xE898;" /></AppBarButton.Icon>
@@ -126,6 +136,23 @@
                         <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                             <Button Content="再試行" Style="{StaticResource AccentButtonStyle}" Click="Reconnect_Click" />
                             <Button Content="接続設定" Click="Edit_Click" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- SFTP のホスト鍵が前回と変わっている（なりすましの可能性があるので、信頼するボタンは目立たせない） -->
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12" MaxWidth="460" Margin="24"
+                                Visibility="{x:Bind ViewModel.ShowHostKeyPrompt, Mode=OneWay}">
+                        <FontIcon Glyph="&#xE7BA;" FontSize="32" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                        <TextBlock Text="サーバーのホスト鍵が、前回と変わっています" HorizontalAlignment="Center" TextAlignment="Center"
+                                   TextWrapping="Wrap" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                        <TextBlock TextWrapping="Wrap" TextAlignment="Center"
+                                   Text="サーバーの移転や再構築で変わることがあります。心当たりが無い場合は、別のサーバーになりすまされている可能性があるので、接続しないでサーバーの管理者に確かめてください。" />
+                        <TextBlock Text="サーバーが出した新しい鍵" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,4,0,-8" />
+                        <TextBox Text="{x:Bind ViewModel.NewHostKeyText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                 FontFamily="Consolas" FontSize="13" />
+                        <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                            <Button Content="新しい鍵を信頼して接続" Click="TrustHostKey_Click" />
+                            <Button Content="接続設定を編集…" Click="Edit_Click" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>

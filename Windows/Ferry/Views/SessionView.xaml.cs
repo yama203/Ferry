@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Ferry.Core;
+using Ferry.Core.Remote;
 using Ferry.ViewModels;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml;
@@ -239,6 +240,83 @@ public sealed partial class SessionView : UserControl
 
     private async void TrustCertificate_Click(object sender, RoutedEventArgs e) =>
         await ViewModel.ConnectWithoutCertificateVerificationAsync();
+
+    private async void TrustHostKey_Click(object sender, RoutedEventArgs e) => await ViewModel.TrustNewHostKeyAsync();
+
+    // MARK: FTPS への切り替えの案内
+
+    /// <summary>「暗号化されていません」の印。この接続先だけを調べて、結果と次にできることを出す</summary>
+    private async void FtpsHint_Click(object sender, RoutedEventArgs e)
+    {
+        FtpsHintButton.IsEnabled = false;
+        FtpsHintText.Text = "調べています…";
+        FtpsCheckResult result;
+        try
+        {
+            result = await ViewModel.CheckFtpsAsync();
+        }
+        catch (Exception error)
+        {
+            AppServices.Log(error, "FTPS の確認");
+            result = new FtpsCheckResult(FtpsCheckOutcome.Failed, error.Message);
+        }
+        finally
+        {
+            FtpsHintButton.IsEnabled = true;
+            FtpsHintText.Text = "暗号化されていません";
+        }
+        await ShowFtpsResultAsync(result);
+    }
+
+    private async Task ShowFtpsResultAsync(FtpsCheckResult result)
+    {
+        var shared = AppServices.Store.IsShared(ViewModel.Server.Id)
+            ? "会社の共有の接続先なので、切り替えると会社の全員の設定が FTPS になります。"
+            : null;
+        var (title, lines, action) = result.Outcome switch
+        {
+            FtpsCheckOutcome.Switchable => ("FTPS に切り替えられます",
+                new string?[] { "この接続先は FTPS（Explicit）でもつながり、サーバーの証明書も確認できました。切り替えると、パスワードもファイルの中身も暗号化されます。", shared },
+                "FTPS に切り替える"),
+            FtpsCheckOutcome.CertificateUnverified => ("FTPS でつながりますが、証明書を確認できません",
+                new string?[] { $"理由: {result.Reason}", result.Advice,
+                        "証明書を検証せずに FTPS にすると、盗み見は防げますが、なりすましは防げません（暗号化なしよりは安全です）。", shared },
+                "証明書を検証せずに FTPS にする"),
+            FtpsCheckOutcome.NotSupported => ("この接続先は FTPS に対応していません",
+                new string?[] { result.Reason, "次からは「暗号化されていません」の印を出しません。" }, (string?)null),
+            _ => ("FTPS に切り替えられるか調べられませんでした", new string?[] { result.Reason }, (string?)null),
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = title,
+            Content = new TextBlock
+            {
+                Text = string.Join("\n\n", lines.Where(line => !string.IsNullOrEmpty(line))),
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            },
+            PrimaryButtonText = action ?? "",
+            // 対応していないと分かったときは、もう印を出さないので「今後表示しない」は要らない
+            SecondaryButtonText = result.Outcome == FtpsCheckOutcome.NotSupported ? "" : "今後表示しない",
+            CloseButtonText = "閉じる",
+            // 証明書を検証しないで切り替えるのは、Enter で選ばれないようにする
+            DefaultButton = result.Outcome == FtpsCheckOutcome.Switchable ? ContentDialogButton.Primary : ContentDialogButton.Close,
+        };
+        switch (await Dialogs.ShowAsync(dialog))
+        {
+            case ContentDialogResult.Primary when result.CanSwitch:
+                var running = ViewModel.Transfers.ActiveCount;
+                if (running > 0 && !await Dialogs.ConfirmAsync(XamlRoot, "転送中です",
+                        $"{running} 件の転送が終わっていません。FTPS に切り替えてつなぎ直すと中止されます。", "切り替える", destructive: true))
+                    return;
+                await ViewModel.SwitchToFtpsAsync(verifyCertificate: result.Outcome == FtpsCheckOutcome.Switchable);
+                break;
+            case ContentDialogResult.Secondary:
+                ViewModel.HideFtpsHint();
+                break;
+        }
+    }
 
     // MARK: 左右のペインの幅（変えたら覚える。境界線のダブルクリックで半分に戻す）
 

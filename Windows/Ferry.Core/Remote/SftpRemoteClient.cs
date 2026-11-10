@@ -15,8 +15,8 @@ public sealed class SftpRemoteClient : IRemoteClient
     private readonly KnownHosts _knownHosts;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly HashSet<string> _knownDirectories = new(StringComparer.Ordinal);
-    /// <summary>ホスト鍵が前回と違ったので接続を止めた</summary>
-    private bool _hostKeyChanged;
+    /// <summary>ホスト鍵が前回と違ったので接続を止めた（そのときサーバーが出した鍵。画面で見せて承認してもらう）</summary>
+    private HostKeyInfo? _changedHostKey;
 
     public SftpRemoteClient(ServerConfig server, string? password, KnownHosts knownHosts)
     {
@@ -360,12 +360,12 @@ public sealed class SftpRemoteClient : IRemoteClient
             KeepAliveInterval = TimeSpan.FromSeconds(30),
             OperationTimeout = TimeSpan.FromSeconds(60),
         };
-        _hostKeyChanged = false;
+        _changedHostKey = null;
         client.HostKeyReceived += (_, e) =>
         {
             var result = _knownHosts.Check(Server.Host, Server.EffectivePort, e.HostKeyName, e.FingerPrintSHA256);
-            _hostKeyChanged = result == KnownHosts.Result.Changed;
-            e.CanTrust = !_hostKeyChanged;
+            _changedHostKey = result == KnownHosts.Result.Changed ? new HostKeyInfo(e.HostKeyName, e.FingerPrintSHA256) : null;
+            e.CanTrust = _changedHostKey is null;
         };
         try
         {
@@ -383,7 +383,7 @@ public sealed class SftpRemoteClient : IRemoteClient
     private Exception Translate(Exception e, CancellationToken cancellation)
     {
         if (e is OperationCanceledException && cancellation.IsCancellationRequested) return FerryException.Cancelled();
-        if (_hostKeyChanged) return FerryException.HostKeyChanged(Server.Host);
+        if (_changedHostKey is { } changed) return FerryException.HostKeyChanged(Server.Host, changed);
         switch (e)
         {
             case SshAuthenticationException:

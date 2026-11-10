@@ -31,6 +31,22 @@ public sealed class AppSettings
     public bool UploadViaTemporaryFile { get; set; } = true;
     /// <summary>最後に接続できなかった接続先と、その理由（サイドバーに印を出す。接続できたら消す）</summary>
     public Dictionary<Guid, string> ConnectionProblems { get; set; } = [];
+    /// <summary>
+    /// 接続中の画面に「暗号化されていません」の印を出さない接続先（FTPS に対応していないと分かったもの・「今後表示しない」を選んだもの）。
+    /// 値は理由（"notSupported" か "dismissed"）
+    /// </summary>
+    public Dictionary<Guid, string> HiddenFtpsHints { get; set; } = [];
+
+    /// <summary>FTP（暗号化なし）の接続先に「暗号化されていません」の印を出すか</summary>
+    public bool ShowsFtpsHint(ServerConfig server) =>
+        server.ServerProtocol == ServerProtocol.Ftp && !HiddenFtpsHints.ContainsKey(server.Id);
+
+    /// <summary>調べた結果を覚える（対応していないと分かったら、印を出さない）。戻り値は変わったか（変わったら保存する）</summary>
+    public bool RememberFtpsCheck(Guid serverId, Remote.FtpsCheckResult result)
+    {
+        if (result.Outcome != Remote.FtpsCheckOutcome.NotSupported) return false;
+        return HiddenFtpsHints.TryAdd(serverId, "notSupported");
+    }
 
     public static string DefaultPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ferry", "settings.json");

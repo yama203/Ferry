@@ -21,6 +21,10 @@
                 <NumberBox x:Name="PortBox" Grid.Column="1" Header="ポート" Minimum="1" Maximum="65535"
                            SpinButtonPlacementMode="Hidden" ValidationMode="InvalidInputOverwritten" />
             </Grid>
+            <!-- FTP（暗号化なし）を選んでいるとき -->
+            <TextBlock x:Name="FtpWarning" Margin="0,-6,0,0" FontSize="12" TextWrapping="Wrap"
+                       Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                       Text="暗号化されません（パスワードもそのまま流れます）。サーバーが対応していれば FTPS をおすすめします。" />
 
             <TextBox x:Name="HostBox" Header="ホスト" PlaceholderText="ftp.example.com" TextChanged="Required_TextChanged" />
             <TextBox x:Name="UserBox" Header="ユーザー名" />

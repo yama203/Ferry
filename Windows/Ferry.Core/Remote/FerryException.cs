@@ -1,3 +1,5 @@
+using System.Net.Security;
+
 namespace Ferry.Core.Remote;
 
 public enum FerryErrorKind
@@ -15,6 +17,8 @@ public enum FerryErrorKind
     DataConnectionFailed,
     /// <summary>サーバーの同時接続数の上限に達している（FTP の 421 など）</summary>
     TooManyConnections,
+    /// <summary>FTPS を選んでいるが、サーバーが AUTH TLS を断った（暗号化に対応していない）</summary>
+    FtpsNotSupported,
     PermissionDenied,
     NotFound,
     Cancelled,
@@ -25,6 +29,12 @@ public enum FerryErrorKind
 public sealed class FerryException : Exception
 {
     public FerryErrorKind Kind { get; }
+
+    /// <summary>証明書を検証できなかった理由（UntrustedCertificate のとき）</summary>
+    public SslPolicyErrors CertificateErrors { get; init; }
+
+    /// <summary>ホスト鍵が変わっていたときに、サーバーが出した新しい鍵（HostKeyChanged のとき。画面で見せて承認してもらう）</summary>
+    public HostKeyInfo? NewHostKey { get; init; }
 
     public FerryException(FerryErrorKind kind, string message, Exception? inner = null) : base(message, inner)
     {
@@ -52,13 +62,18 @@ public sealed class FerryException : Exception
         new(FerryErrorKind.TooManyConnections,
             "サーバーの同時接続数の上限に達しているため、接続できませんでした。しばらくしてからやり直してください。" + Detail(detail), inner);
 
-    public static FerryException UntrustedCertificate(string reason, Exception? inner = null) =>
-        new(FerryErrorKind.UntrustedCertificate, $"サーバーの証明書を確認できません（{reason}）。", inner);
+    public static FerryException UntrustedCertificate(string reason, Exception? inner = null,
+                                                      SslPolicyErrors errors = SslPolicyErrors.None) =>
+        new(FerryErrorKind.UntrustedCertificate, $"サーバーの証明書を確認できません（{reason}）。", inner) { CertificateErrors = errors };
 
-    public static FerryException HostKeyChanged(string host) =>
+    public static FerryException FtpsNotSupported(Exception? inner = null) =>
+        new(FerryErrorKind.FtpsNotSupported,
+            "サーバーが FTPS（暗号化）に対応していません。方式を「FTP」にするか、サーバーの設定を確認してください。", inner);
+
+    public static FerryException HostKeyChanged(string host, HostKeyInfo? newKey = null) =>
         new(FerryErrorKind.HostKeyChanged,
             $"サーバー「{host}」のホスト鍵が前回の接続時と違います。別のサーバーにすり替えられている可能性があるため、接続を止めました。"
-            + "サーバーを移転した場合などは、管理者に確認してください。");
+            + "サーバーを移転した場合などは、管理者に確認してください。") { NewHostKey = newKey };
 
     public static FerryException PermissionDenied(string? detail = null, Exception? inner = null) =>
         new(FerryErrorKind.PermissionDenied, "権限がありません。" + Detail(detail), inner);
@@ -73,4 +88,13 @@ public sealed class FerryException : Exception
 
     private static string Detail(string? detail) =>
         string.IsNullOrWhiteSpace(detail) ? "" : $"（サーバーの応答: {detail.Trim()}）";
+}
+
+/// <summary>SFTP のホスト鍵（種類と SHA256 のフィンガープリント）</summary>
+/// <param name="KeyType">"ssh-ed25519" など</param>
+/// <param name="Fingerprint">SSH.NET の FingerPrintSHA256 の形（パディング無しの base64。KnownHosts に記録する形）</param>
+public sealed record HostKeyInfo(string KeyType, string Fingerprint)
+{
+    /// <summary>ssh-keygen -lf と同じ表記（"SHA256:" + パディング無しの base64）</summary>
+    public string DisplayFingerprint => Fingerprint.StartsWith("SHA256:", StringComparison.Ordinal) ? Fingerprint : "SHA256:" + Fingerprint;
 }

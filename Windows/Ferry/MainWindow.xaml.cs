@@ -563,4 +563,35 @@ public sealed partial class MainWindow : Window
         await ImportDialog.ImportWinScpAsync(XamlRootOrThrow);
 
     private async void Settings_Click(object sender, RoutedEventArgs e) => await OpenSettingsAsync(SettingsDialog.Tab.Shared);
+
+    // MARK: FTPS への切り替え
+
+    /// <summary>暗号化なしの FTP の接続先をまとめて調べ、選んだものを FTPS（Explicit）にする。開いている接続先はつなぎ直す</summary>
+    private async void FtpsSurvey_Click(object sender, RoutedEventArgs e)
+    {
+        if (await FtpsSurveyDialog.ShowAsync(XamlRootOrThrow) is not { } survey) return;
+        var selected = survey.Entries.Where(entry => entry.IsSelected).Select(entry => entry.Server.Id).ToHashSet();
+        var running = _sessions.Where(s => selected.Contains(s.Key)).Sum(s => s.Value.ViewModel.Transfers.ActiveCount);
+        if (running > 0 && !await Dialogs.ConfirmAsync(XamlRootOrThrow, "転送中です",
+                $"{running} 件の転送が終わっていません。FTPS に切り替えてつなぎ直すと中止されます。", "切り替える", destructive: true))
+            return;
+
+        var switched = survey.Apply(AppServices.Store);
+        foreach (var server in switched)
+        {
+            if (!_sessions.TryGetValue(server.Id, out var session)) continue;
+            await session.ViewModel.ReplaceServerAsync(server);
+            if (_currentServerId == server.Id) await session.ViewModel.ConnectAsync();
+        }
+        var skipped = selected.Count - switched.Count;
+        var message = $"{switched.Count} 件の接続先を FTPS（Explicit）にしました。";
+        if (skipped > 0) message += $"調べた後に設定が変わっていた {skipped} 件は切り替えていません。";
+        await Dialogs.ShowAsync(new ContentDialog
+        {
+            XamlRoot = XamlRootOrThrow,
+            Title = "FTPS に切り替えました",
+            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            CloseButtonText = "閉じる",
+        });
+    }
 }

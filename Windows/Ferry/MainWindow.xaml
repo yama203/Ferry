@@ -60,6 +60,10 @@
                                 <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B5;" /></MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                             <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="FTPS に切り替えられる接続先を調べる…" Click="FtpsSurvey_Click">
+                                <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE72E;" /></MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator />
                             <MenuFlyoutItem Text="設定…" Click="Settings_Click">
                                 <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE713;" /></MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>

@@ -70,6 +70,7 @@ public sealed partial class ServerEditDialog : ContentDialog
         PassiveSwitch.Visibility = protocol.IsFtpFamily() ? Visibility.Visible : Visibility.Collapsed;
         VerifySwitch.Visibility = protocol.UsesTls() ? Visibility.Visible : Visibility.Collapsed;
         PrivateKeyRow.Visibility = protocol == ServerProtocol.Sftp ? Visibility.Visible : Visibility.Collapsed;
+        FtpWarning.Visibility = protocol == ServerProtocol.Ftp ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void ProtocolBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateProtocolFields();

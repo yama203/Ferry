@@ -14,6 +14,8 @@ public enum SessionStatus
     NeedsPassword,
     /// <summary>FTPS の証明書を検証できなかった（自己署名など）</summary>
     UntrustedCertificate,
+    /// <summary>SFTP のホスト鍵が前回と変わっていた（新しい鍵を見せて、信頼するかを聞く）</summary>
+    HostKeyChanged,
 }
 
 /// <summary>1 つの接続先を開いている間の状態（左右のペイン）</summary>
@@ -25,7 +27,8 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsConnected), nameof(IsConnecting), nameof(ShowPasswordPrompt),
-                              nameof(ShowCertificatePrompt), nameof(ShowFailure), nameof(ShowRemotePane), nameof(ShowStatusPanel))]
+                              nameof(ShowCertificatePrompt), nameof(ShowFailure), nameof(ShowRemotePane), nameof(ShowStatusPanel),
+                              nameof(ShowHostKeyPrompt), nameof(ShowFtpsHint))]
     public partial SessionStatus Status { get; private set; } = SessionStatus.Idle;
 
     /// <summary>エラーやパスワード画面に出す説明</summary>
@@ -37,6 +40,21 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
     public bool ShowPasswordPrompt => Status == SessionStatus.NeedsPassword;
     public bool ShowCertificatePrompt => Status == SessionStatus.UntrustedCertificate;
     public bool ShowFailure => Status == SessionStatus.Failed;
+    public bool ShowHostKeyPrompt => Status == SessionStatus.HostKeyChanged;
+
+    /// <summary>ホスト鍵が変わっていたときに、サーバーが出した新しい鍵</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NewHostKeyText))]
+    public partial HostKeyInfo? NewHostKey { get; private set; }
+
+    /// <summary>新しい鍵の種類とフィンガープリント（ssh-keygen -lf と同じ表記。選択してコピーできるように出す）</summary>
+    public string NewHostKeyText => NewHostKey is { } key ? $"{key.KeyType}\n{key.DisplayFingerprint}" : "";
+
+    /// <summary>
+    /// 暗号化なしの FTP でつないでいるときに「暗号化されていません」の印を出す
+    /// （FTPS に対応していないと分かった・「今後表示しない」を選んだ接続先には出さない）
+    /// </summary>
+    public bool ShowFtpsHint => IsConnected && AppServices.Settings.ShowsFtpsHint(Server);
     public bool ShowRemotePane => Status == SessionStatus.Connected;
     /// <summary>接続していないときはサーバー側に状態（接続中・パスワード・証明書・エラー）を出す</summary>
     public bool ShowStatusPanel => !ShowRemotePane;
@@ -379,6 +397,12 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
             StatusMessage = e.Message;
             Status = SessionStatus.UntrustedCertificate;
         }
+        catch (FerryException e) when (e.Kind == FerryErrorKind.HostKeyChanged && e.NewHostKey is not null)
+        {
+            StatusMessage = e.Message;
+            NewHostKey = e.NewHostKey;
+            Status = SessionStatus.HostKeyChanged;
+        }
         catch (Exception e)
         {
             Fail(BrowserViewModel.Describe(e));
@@ -395,6 +419,10 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
                 break;
             case SessionStatus.Failed:
                 AppServices.SetConnectionProblem(Server.Id, StatusMessage);
+                break;
+            case SessionStatus.HostKeyChanged:
+                AppServices.SetConnectionProblem(Server.Id,
+                    "サーバーのホスト鍵が前回と変わっています（サーバーの移転・再構築か、なりすましの可能性があります）。接続して確かめてください。");
                 break;
             // パスワードを保存していないだけのときは印を出さない（ログインに失敗したときだけ理由がある）
             case SessionStatus.NeedsPassword when StatusMessage is not null:
@@ -431,6 +459,53 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         await ConnectAsync();
     }
 
+    /// <summary>
+    /// 「新しい鍵を信頼して接続」。記録している鍵を、画面に出した鍵（ユーザーが見て承認したもの）に置き換えてつなぎ直す。
+    /// 消してつなぎ直すのではないので、この後さらに別の鍵に変わっていたら、もう一度止まる
+    /// </summary>
+    public async Task TrustNewHostKeyAsync()
+    {
+        if (Status != SessionStatus.HostKeyChanged || NewHostKey is not { } key) return;
+        new KnownHosts(RemoteClientFactory.KnownHostsPath).Replace(Server.Host, Server.EffectivePort, key);
+        NewHostKey = null;
+        // 一覧用・転送用・プレビュー用の接続を作り直す（どれも同じ記録を読むので、承認した鍵でつながる）
+        await ReplaceServerAsync(Server);
+        await ConnectAsync();
+    }
+
+    // MARK: FTPS への切り替えの案内
+
+    /// <summary>この接続先が FTPS（Explicit）でもつながるかを、別の接続で調べる（今の接続は邪魔しない）</summary>
+    public async Task<FtpsCheckResult> CheckFtpsAsync()
+    {
+        var result = await FtpsCheck.CheckAsync(Server, _password ?? AppServices.Passwords.KnownPassword(Server.Id));
+        // 対応していないと分かったら、次からは印を出さない
+        if (AppServices.Settings.RememberFtpsCheck(Server.Id, result))
+        {
+            AppServices.Settings.Save();
+            OnPropertyChanged(nameof(ShowFtpsHint));
+        }
+        return result;
+    }
+
+    /// <summary>「今後表示しない」</summary>
+    public void HideFtpsHint()
+    {
+        AppServices.Settings.HiddenFtpsHints[Server.Id] = "dismissed";
+        AppServices.Settings.Save();
+        OnPropertyChanged(nameof(ShowFtpsHint));
+    }
+
+    /// <summary>FTPS（Explicit）に切り替えて保存し、つなぎ直す（接続設定を変えたときと同じ流れ。ポートはそのまま）</summary>
+    public async Task SwitchToFtpsAsync(bool verifyCertificate)
+    {
+        var current = AppServices.Store.Server(Server.Id) ?? Server;
+        var updated = current with { ServerProtocol = ServerProtocol.Ftps, VerifyCertificate = verifyCertificate };
+        AppServices.Store.Upsert(updated);
+        await ReplaceServerAsync(updated);
+        await ConnectAsync();
+    }
+
     /// <summary>接続設定が変わったとき。接続を作り直す（開いている場所はそのまま）</summary>
     public async Task ReplaceServerAsync(ServerConfig server)
     {
@@ -449,6 +524,7 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Subtitle));
         OnPropertyChanged(nameof(PasswordLabel));
+        OnPropertyChanged(nameof(ShowFtpsHint));
         Status = SessionStatus.Idle;
         await old.DisposeAsync();
     }

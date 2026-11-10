@@ -23,6 +23,7 @@ public sealed class FtpRemoteClient : IRemoteClient
     private readonly HashSet<string> _knownDirectories = new(StringComparer.Ordinal);
     /// <summary>証明書の検証に失敗した理由（接続のエラーを分かりやすくするため）</summary>
     private string? _certificateProblem;
+    private SslPolicyErrors _certificateErrors;
 
     public FtpRemoteClient(ServerConfig server, string? password)
     {
@@ -381,6 +382,7 @@ public sealed class FtpRemoteClient : IRemoteClient
         client.Encoding = Encoding.UTF8;
 
         _certificateProblem = null;
+        _certificateErrors = SslPolicyErrors.None;
         client.ValidateCertificate += (_, e) =>
         {
             if (!Server.VerifyCertificate || e.PolicyErrors == SslPolicyErrors.None)
@@ -389,6 +391,7 @@ public sealed class FtpRemoteClient : IRemoteClient
                 return;
             }
             _certificateProblem = DescribeCertificateProblem(e.PolicyErrors);
+            _certificateErrors = e.PolicyErrors;
             e.Accept = false;
         };
 
@@ -443,7 +446,7 @@ public sealed class FtpRemoteClient : IRemoteClient
             : FerryException.ConnectionRefused(Server.Host, Server.EffectivePort, e);
     }
 
-    private static string DescribeCertificateProblem(SslPolicyErrors errors)
+    internal static string DescribeCertificateProblem(SslPolicyErrors errors)
     {
         var reasons = new List<string>();
         if (errors.HasFlag(SslPolicyErrors.RemoteCertificateNameMismatch)) reasons.Add("証明書のホスト名が接続先と一致しません");
@@ -457,7 +460,7 @@ public sealed class FtpRemoteClient : IRemoteClient
         if (e is OperationCanceledException && cancellation.IsCancellationRequested) return FerryException.Cancelled();
         if (_certificateProblem is { } problem
             && (e is FtpInvalidCertificateException or AuthenticationException || e.InnerException is AuthenticationException))
-            return FerryException.UntrustedCertificate(problem, e);
+            return FerryException.UntrustedCertificate(problem, e, _certificateErrors);
 
         var connected = _client?.IsConnected == true;
         switch (e)
@@ -471,9 +474,10 @@ public sealed class FtpRemoteClient : IRemoteClient
                     : FerryException.Other("ログインできませんでした: " + auth.Message, e);
             case FtpInvalidCertificateException:
                 return FerryException.UntrustedCertificate("検証に失敗しました", e);
+            // AUTH TLS を断られた（FTPS に切り替えられるかを調べるときに「対応していない」と区別するため、種類を分ける）
             case FtpSecurityNotAvailableException:
-                return FerryException.Other(
-                    "サーバーが FTPS（暗号化）に対応していません。方式を「FTP」にするか、サーバーの設定を確認してください。", e);
+            case FtpException { InnerException: FtpSecurityNotAvailableException }:
+                return FerryException.FtpsNotSupported(e);
             case FtpCommandException command:
                 return FromReply(command.CompletionCode, command.Message, e);
             // アップロードの失敗は「Error while uploading the file」で包まれるので、中のサーバーの応答で分類する

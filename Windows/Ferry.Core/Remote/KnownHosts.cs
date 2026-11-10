@@ -35,6 +35,21 @@ public sealed class KnownHosts
         }
     }
 
+    /// <summary>
+    /// ホスト鍵が変わったときに、ユーザーが画面で見て承認した鍵に記録を置き換える（そのホスト・ポートの他の種類の鍵の記録も消す）。
+    /// 消すだけにしないのは、消してつなぎ直すと、承認した後に別の鍵にすり替わっても初めてのホストとして受け入れてしまうため。
+    /// 置き換えた後は、この鍵でだけつながり、違う鍵・違う種類の鍵なら今までどおり Changed になる
+    /// </summary>
+    public void Replace(string host, int port, HostKeyInfo key)
+    {
+        lock (FileLock)
+        {
+            var hosts = Load();
+            hosts[$"{host.ToLowerInvariant()}:{port}"] = new Dictionary<string, string> { [key.KeyType] = key.Fingerprint };
+            FerryJson.WriteAtomically(_path, FerryJson.Serialize(hosts));
+        }
+    }
+
     /// <summary>記録を消す（サーバーを移転したときなど）</summary>
     public void Forget(string host, int port)
     {
