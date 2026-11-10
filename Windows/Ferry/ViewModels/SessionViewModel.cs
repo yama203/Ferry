@@ -64,7 +64,8 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         // 一覧用と転送用で接続を分け、転送中でもフォルダを移動できるようにする
         _browseClient = RemoteClientFactory.Create(server, password);
         Remote.Client = _browseClient;
-        Transfers = new TransferQueueViewModel(RemoteClientFactory.Create(server, password), () => _browseClient, server.Name);
+        // 転送用の接続は、同時に転送する数まで必要になったときに作る
+        Transfers = new TransferQueueViewModel(() => RemoteClientFactory.Create(server, password), () => _browseClient, server.Name);
         Transfers.Idle += async (_, _) =>
         {
             await Local.RefreshAsync();
@@ -198,7 +199,7 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         get
         {
             if (_editWatcher is not null) return _editWatcher;
-            _editWatcher = new EditWatcher(file => AppServices.OnUi(() => UploadEdited(file)));
+            _editWatcher = new EditWatcher(file => AppServices.OnUi(() => _ = EditFlow.SavedAsync(file)));
             _editWatcher.Changed += (_, _) => AppServices.OnUi(() => EditedFiles = _editWatcher.Files);
             return _editWatcher;
         }
@@ -207,13 +208,39 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
     /// <summary>エディタからのアップロードの失敗（転送が終わった後の再読み込みでエラー表示が消えるので、その後にも出す）</summary>
     private string? _editUploadFailure;
 
+    /// <summary>保存 → 他の人が変えていないかの確認 → アップロード の順番（ファイルごと）</summary>
+    private EditUploadFlow? _editFlow;
+
+    private EditUploadFlow EditFlow => _editFlow ??= new EditUploadFlow(
+        // 一覧用の接続で、今のサイズ・更新日時を取る（開いたときの値と同じ形式）
+        directory => _browseClient.ListAsync(directory),
+        ConfirmEditConflictAsync,
+        UploadEditedAsync);
+
+    /// <summary>エディタで開いた後にサーバー側が変わっていたときに聞く（画面が設定する）。true なら上書きする</summary>
+    public Func<EditedFile, EditConflict, Task<bool>>? AskEditConflict { get; set; }
+
     /// <summary>
-    /// エディタで保存されたファイルをアップロードする。失敗したら、保存できたと思い込まないよう
+    /// 開いた後に他の人がサーバー側を変えた・消したとき。ユーザーはエディタを見ているので、
+    /// 確認の画面に加えて通知（通知の設定に関係なく）でも知らせる
+    /// </summary>
+    private async Task<bool> ConfirmEditConflictAsync(EditedFile file, EditConflict conflict)
+    {
+        // 監視をやめた・開き直したファイルの古い確認は出さない（アップロードもしない）
+        if (!Watcher.IsWatching(file) || AskEditConflict is null) return false;
+        var name = RemotePath.Name(file.RemotePath);
+        var what = conflict == EditConflict.Deleted ? "削除されています" : "変更されています";
+        Notifier.Show($"「{name}」はサーバーで{what}", $"{Server.Name}：エディタで開いた後に{what}。上書きするか確認してください。");
+        return await AskEditConflict(file, conflict);
+    }
+
+    /// <summary>
+    /// エディタで保存されたファイルをアップロードし、終わるまで待つ（成功したら true）。失敗したら、保存できたと思い込まないよう
     /// 通知（通知の設定に関係なく）とサーバー側のエラー表示の両方で知らせる（中止したときは知らせない）
     /// </summary>
-    private void UploadEdited(EditedFile file)
+    private async Task<bool> UploadEditedAsync(EditedFile file, bool exists, string? permissions)
     {
-        var item = Transfers.UploadEdited(file.LocalPath, file.RemotePath);
+        var item = Transfers.UploadEdited(file.LocalPath, file.RemotePath, exists, permissions);
         var name = RemotePath.Name(file.RemotePath);
         void ReportIfFailed()
         {
@@ -226,10 +253,15 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         // 再読み込みより先に覚えておくため、終わるのを待たずに状態の変化で受け取る（やり直して失敗したときも知らせる）
         item.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(TransferItem.State)) ReportIfFailed();
+            if (e.PropertyName != nameof(TransferItem.State)) return;
+            ReportIfFailed();
+            // 失敗した後に転送一覧から「やり直し」て成功したら、次の保存で自分のアップロードを「変更された」と判定しないよう基準を取り直す
+            if (item.State == TransferState.Finished) _ = EditFlow.UploadedOutsideFlowAsync(file);
         };
         // 接続済みでファイルが消えていた場合などは、追加した時点で失敗していることがある
         ReportIfFailed();
+        await item.Completion;
+        return item.State == TransferState.Finished;
     }
 
     /// <summary>一時フォルダにダウンロードしてエディタで開き、保存されるたびにアップロードする</summary>
@@ -244,7 +276,8 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             await PreviewClient.DownloadAsync(entry.Path, path, entry.Size);
-            Watcher.Watch(path, entry.Path);
+            // 一覧に出たサイズ・更新日時を基準に覚え、保存したときに他の人が変えていないかを見る
+            Watcher.Watch(path, entry.Path, baseline: new RemoteSnapshot(entry.Size, entry.Modified));
             Editor.Open(path);
         }
         catch (Exception e)
@@ -406,7 +439,7 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         var password = AppServices.Passwords.GetPassword(server.Id);
         _browseClient = RemoteClientFactory.Create(server, password);
         Remote.Client = _browseClient;
-        await Transfers.ReplaceClientAsync(RemoteClientFactory.Create(server, password));
+        await Transfers.ReplaceClientAsync(() => RemoteClientFactory.Create(server, password));
         if (_previewClient is not null)
         {
             await _previewClient.DisposeAsync();

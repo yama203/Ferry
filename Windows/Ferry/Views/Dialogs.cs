@@ -31,9 +31,9 @@ public static class Dialogs
             CloseButtonText = "OK",
         });
 
-    /// <summary>確認。destructive なら実行するボタンを既定にしない（Enter で消えないように）</summary>
+    /// <summary>確認。destructive なら実行するボタンを既定にしない（Enter で消えないように）。cancel はやめるボタンの文言</summary>
     public static async Task<bool> ConfirmAsync(XamlRoot root, string title, string message, string action,
-                                                bool destructive = false)
+                                                bool destructive = false, string cancel = "キャンセル")
     {
         var dialog = new ContentDialog
         {
@@ -41,7 +41,7 @@ public static class Dialogs
             Title = title,
             Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
             PrimaryButtonText = action,
-            CloseButtonText = "キャンセル",
+            CloseButtonText = cancel,
             DefaultButton = destructive ? ContentDialogButton.Close : ContentDialogButton.Primary,
         };
         return await ShowAsync(dialog) == ContentDialogResult.Primary;

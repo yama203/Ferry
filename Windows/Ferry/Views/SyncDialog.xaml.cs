@@ -278,6 +278,9 @@ public sealed partial class SyncDialog : ContentDialog
             LocalPath = Path.Combine(_localRoot, change.RelativePath.Replace('/', '\\')),
             RemotePath = RemotePath.Join(_remoteRoot, change.RelativePath),
             Size = change.Size,
+            // 「変更」は送り先にある（アップロードでは一時ファイルから置き換え、元の権限に戻す）。「新規」は無い
+            DestinationExists = change.Reason == SyncPlanner.ChangeReason.Changed,
+            DestinationPermissions = upload && _remoteEntries.TryGetValue(change.RelativePath, out var remote) ? remote.Permissions : null,
         }).ToList();
         // ダウンロードでは更新日時をサーバーに揃えるので、比較で調べた送信元の日時を渡しておく
         if (!upload)

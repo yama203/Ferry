@@ -11,6 +11,16 @@ public sealed class EditedFile
     /// <summary>変更を検知したが、書き込み途中かもしれないので次の確認まで待っている</summary>
     internal DateTime? PendingSince { get; set; }
 
+    /// <summary>
+    /// サーバー側のファイルの基準（エディタで開いたとき・最後にアップロードしたときの一覧の値）。
+    /// 保存したときに一覧の値と比べて、他の人が変えていないかを見る。null なら分からない（比べない）
+    /// </summary>
+    public RemoteSnapshot? Baseline { get; set; }
+    /// <summary>保存を受けてから、確認・アップロードが終わるまで（EditUploadFlow が使う）</summary>
+    internal EditUploadFlow.Phase FlowPhase { get; set; }
+    /// <summary>アップロードしている間にまた保存された（終わったらもう一度確認してアップロードする）</summary>
+    internal bool SavedDuringUpload { get; set; }
+
     public string Name => Path.GetFileName(LocalPath);
 }
 
@@ -40,9 +50,19 @@ public sealed class EditWatcher : IDisposable
         get { lock (_lock) return _files.ToList(); }
     }
 
-    public EditedFile Watch(string localPath, string remotePath, bool startTimer = true)
+    /// <summary>まだ監視しているか（監視をやめた・開き直したファイルの確認を出さないため）</summary>
+    public bool IsWatching(EditedFile file)
     {
-        var file = new EditedFile { LocalPath = localPath, RemotePath = remotePath, LastModified = Modified(localPath) };
+        lock (_lock) return _files.Contains(file);
+    }
+
+    /// <summary>baseline はサーバー側のファイルの一覧の値（開いた後に他の人が変えたかを見る）</summary>
+    public EditedFile Watch(string localPath, string remotePath, bool startTimer = true, RemoteSnapshot? baseline = null)
+    {
+        var file = new EditedFile
+        {
+            LocalPath = localPath, RemotePath = remotePath, LastModified = Modified(localPath), Baseline = baseline,
+        };
         lock (_lock)
         {
             _files.RemoveAll(f => f.RemotePath == remotePath);

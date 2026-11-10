@@ -4,13 +4,13 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Ferry.Views;
 
-/// <summary>設定（会社の共有、除外）。エディタ・通知のタブは後で足す</summary>
+/// <summary>設定（会社の共有、保存場所、パスワード、除外、転送、エディタ、通知）</summary>
 public sealed partial class SettingsDialog : ContentDialog
 {
     private string? _sharedDirectory;
 
     /// <summary>開いたときに選ぶタブ（左のタブの並び順）</summary>
-    public enum Tab { Shared, Storage, Passwords, Exclude, Editor, Notifications }
+    public enum Tab { Shared, Storage, Passwords, Exclude, Transfer, Editor, Notifications }
 
     /// <summary>自分の接続先の保存場所を変えたときの説明（再起動を勧める）。変えていなければ null</summary>
     public string? StorageMessage { get; private set; }
@@ -26,6 +26,8 @@ public sealed partial class SettingsDialog : ContentDialog
         ExcludeBox.Text = string.Join("\r", AppServices.Store.ExcludeRules.Patterns);
         _editorPath = AppServices.Settings.EditorPath;
         NotifySwitch.IsOn = AppServices.Settings.NotifyOnComplete;
+        ConcurrencyBox.SelectedIndex = Math.Clamp(AppServices.Settings.ConcurrentTransfers, 1, TransferLanes<object>.MaxLanes) - 1;
+        SafeUploadSwitch.IsOn = AppServices.Settings.UploadViaTemporaryFile;
         UpdateShared();
         UpdateEditor();
         UpdateStorage();
@@ -35,7 +37,7 @@ public sealed partial class SettingsDialog : ContentDialog
     /// <summary>左のタブを選んだら、右の中身を切り替える（並びは Tab の順）</summary>
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        UIElement[] pages = [SharedPage, StoragePage, PasswordsPage, ExcludePage, EditorPage, NotificationsPage];
+        UIElement[] pages = [SharedPage, StoragePage, PasswordsPage, ExcludePage, TransferPage, EditorPage, NotificationsPage];
         for (var i = 0; i < pages.Length; i++)
             pages[i].Visibility = i == Tabs.SelectedIndex ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -202,6 +204,8 @@ public sealed partial class SettingsDialog : ContentDialog
 
         AppServices.Settings.EditorPath = _editorPath;
         AppServices.Settings.NotifyOnComplete = NotifySwitch.IsOn;
+        AppServices.Settings.ConcurrentTransfers = Math.Max(ConcurrencyBox.SelectedIndex, 0) + 1;
+        AppServices.Settings.UploadViaTemporaryFile = SafeUploadSwitch.IsOn;
         AppServices.Settings.Save();
 
         var patterns = ExcludeBox.Text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

@@ -25,6 +25,8 @@ public sealed record PlannedTransfer
     /// <summary>転送先に同名のファイルがあるか（上書き確認用）</summary>
     public bool DestinationExists { get; init; }
     public DateTime? DestinationModified { get; init; }
+    /// <summary>転送先の同名のファイルのパーミッション（"rwxr-xr-x" 形式。アップロードで置き換えた後に戻す）</summary>
+    public string? DestinationPermissions { get; init; }
 
     public string Name => Direction == TransferDirection.Upload ? Path.GetFileName(LocalPath) : Core.RemotePath.Name(RemotePath);
 
@@ -110,7 +112,7 @@ public static class TransferPlanner
             }
         }
         return batch.Select(t => existing.TryGetValue(t.RemotePath, out var remote) && !remote.IsDirectory
-            ? t with { DestinationExists = true, DestinationModified = remote.Modified }
+            ? t with { DestinationExists = true, DestinationModified = remote.Modified, DestinationPermissions = remote.Permissions }
             : t).ToList();
     }
 

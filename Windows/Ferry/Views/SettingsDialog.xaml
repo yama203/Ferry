@@ -44,6 +44,10 @@
                 <TextBlock Text="除外" VerticalAlignment="Center" />
             </StackPanel>
             <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE898;" FontSize="16" />
+                <TextBlock Text="転送" VerticalAlignment="Center" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="10">
                 <FontIcon Glyph="&#xE70F;" FontSize="16" />
                 <TextBlock Text="エディタ" VerticalAlignment="Center" />
             </StackPanel>
@@ -108,6 +112,25 @@
                     <TextBox x:Name="ExcludeBox" AcceptsReturn="True" Height="260" FontFamily="Consolas" TextWrapping="NoWrap"
                              ScrollViewer.VerticalScrollBarVisibility="Auto" />
                     <HyperlinkButton Content="既定に戻す" Click="ResetExclude_Click" Padding="0" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- 転送 -->
+            <ScrollViewer x:Name="TransferPage" Visibility="Collapsed">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
+                    <TextBlock Text="転送" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <ComboBox x:Name="ConcurrencyBox" Header="同時に転送する数" MinWidth="120">
+                        <ComboBoxItem Content="1" />
+                        <ComboBoxItem Content="2" />
+                        <ComboBoxItem Content="3" />
+                        <ComboBoxItem Content="4" />
+                    </ComboBox>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="WordPress のテーマのように小さいファイルが多いときに速くなります。転送用にサーバーへの接続をこの数まで使います（一覧用の接続とは別）。同時に接続できる数が少ないサーバーでは、つながらない分は自動で減らします。変えると、次に始まる転送から効きます。" />
+                    <ToggleSwitch x:Name="SafeUploadSwitch" Header="アップロードは一時ファイルに送ってから置き換える"
+                                  OnContent="置き換える" OffContent="直接上書きする" />
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               Text="サーバーにすでにあるファイルは、同じフォルダの「.名前.ferrypart」に送り終えてから置き換えます。途中で切れても、書きかけのファイルがサイトに出ません。パーミッションは元のファイルと同じにします。新しいファイルは直接送ります。" />
                 </StackPanel>
             </ScrollViewer>
 

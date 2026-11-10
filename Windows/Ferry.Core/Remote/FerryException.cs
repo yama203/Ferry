@@ -13,6 +13,8 @@ public enum FerryErrorKind
     Timeout,
     /// <summary>制御接続はできたが、データ接続（一覧・転送）ができない</summary>
     DataConnectionFailed,
+    /// <summary>サーバーの同時接続数の上限に達している（FTP の 421 など）</summary>
+    TooManyConnections,
     PermissionDenied,
     NotFound,
     Cancelled,
@@ -45,6 +47,10 @@ public sealed class FerryException : Exception
     public static FerryException DataConnectionFailed(Exception? inner = null) =>
         new(FerryErrorKind.DataConnectionFailed,
             "データ接続（一覧・転送用の接続）ができませんでした。接続設定の「パッシブモード」を切り替えると直ることがあります。", inner);
+
+    public static FerryException TooManyConnections(string? detail = null, Exception? inner = null) =>
+        new(FerryErrorKind.TooManyConnections,
+            "サーバーの同時接続数の上限に達しているため、接続できませんでした。しばらくしてからやり直してください。" + Detail(detail), inner);
 
     public static FerryException UntrustedCertificate(string reason, Exception? inner = null) =>
         new(FerryErrorKind.UntrustedCertificate, $"サーバーの証明書を確認できません（{reason}）。", inner);

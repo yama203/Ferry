@@ -70,31 +70,149 @@ public sealed class SftpRemoteClient : IRemoteClient
             return true;
         }, cancellation);
 
-    public Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
-                            CancellationToken cancellation = default) =>
-        RunAsync(async (client, token) =>
+    public async Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
+                                  CancellationToken cancellation = default, UploadOptions? options = null)
+    {
+        if (options is not { ViaTemporaryFile: true })
         {
-            await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
-            var modified = File.GetLastWriteTimeUtc(localPath);
-            await using (var input = File.OpenRead(localPath))
+            await RunAsync(async (client, token) =>
             {
-                var total = input.Length;
-                var reporter = progress is null
-                    ? null
-                    : new Progress<UploadFileProgressReport>(p => progress((long)p.TotalBytesUploaded, total));
-                await client.UploadFileAsync(input, remotePath, reporter, token);
-            }
-            // 更新日時をローカルのファイルに合わせる（同期や「新しい場合のみ上書き」で、アップロードしたものが新しく見えないように）
-            try
+                var modified = File.GetLastWriteTimeUtc(localPath);
+                await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
+                await UploadFileAsync(client, localPath, remotePath, progress, token);
+                // SSH.NET の属性の変更は同期の API なので、UI スレッドを止めないよう別のスレッドで
+                await Task.Run(() => SetModifiedTime(client, remotePath, modified), CancellationToken.None);
+                return true;
+            }, cancellation);
+            return;
+        }
+        // 接続が切れてやり直すときも同じ手順を使い、済んだところから続ける
+        var replace = new ReplacingUpload(remotePath, options.Permissions);
+        try
+        {
+            await RunAsync(async (client, token) =>
             {
-                client.SetLastWriteTimeUtc(remotePath, modified);
-            }
-            catch (Exception)
+                await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
+                await replace.RunAsync(new ReplaceSteps(this, client, localPath, progress), token);
+                return true;
+            }, cancellation);
+        }
+        catch (FerryException e)
+        {
+            throw replace.Explain(e);
+        }
+    }
+
+    private static async Task UploadFileAsync(SftpClient client, string localPath, string remotePath,
+                                              TransferProgress? progress, CancellationToken token)
+    {
+        await using var input = File.OpenRead(localPath);
+        var total = input.Length;
+        var reporter = progress is null
+            ? null
+            : new Progress<UploadFileProgressReport>(p => progress((long)p.TotalBytesUploaded, total));
+        await client.UploadFileAsync(input, remotePath, reporter, token);
+    }
+
+    /// <summary>更新日時をローカルのファイルに合わせる（同期や「新しい場合のみ上書き」で、アップロードしたものが新しく見えないように）</summary>
+    private static void SetModifiedTime(SftpClient client, string remotePath, DateTime modifiedUtc)
+    {
+        try
+        {
+            client.SetLastWriteTimeUtc(remotePath, modifiedUtc);
+        }
+        catch (Exception)
+        {
+            // 属性を変えられないサーバーもある。アップロードは済んでいるので成功として扱う
+        }
+    }
+
+    /// <summary>posix-rename（置き換え先があっても置き換える）を使うか。テストで通常の rename の場合を確かめるために切り替える</summary>
+    internal bool UsePosixRename { get; set; } = true;
+
+    /// <summary>一時ファイルへ送ってから置き換えるときの SFTP の操作</summary>
+    private sealed class ReplaceSteps(SftpRemoteClient owner, SftpClient client, string localPath, TransferProgress? progress)
+        : ReplacingUpload.ISteps
+    {
+        private SftpClient _client = client;
+        /// <summary>送る前に読んでおく（送っている間にエディタで保存されても、送った内容の日時にする）</summary>
+        private readonly DateTime _modified = File.GetLastWriteTimeUtc(localPath);
+
+        public Task UploadAsync(string remotePath, CancellationToken cancellation) =>
+            UploadFileAsync(_client, localPath, remotePath, progress, cancellation);
+
+        public async Task RenameAsync(string from, string to, CancellationToken cancellation)
+        {
+            // 通常の SFTP の rename は置き換え先があると失敗する（OpenSSH など）ので、対応していれば posix-rename を使う
+            if (owner.UsePosixRename)
             {
-                // 属性を変えられないサーバーもある。アップロードは済んでいるので成功として扱う
+                try
+                {
+                    // 同期の API なので、UI スレッドを止めないよう別のスレッドで
+                    await Task.Run(() => _client.RenameFile(from, to, isPosix: true), CancellationToken.None);
+                    return;
+                }
+                catch (NotSupportedException) { }
             }
-            return true;
-        }, cancellation);
+            await _client.RenameFileAsync(from, to, cancellation);
+        }
+
+        public Task DeleteAsync(string path, CancellationToken cancellation) => _client.DeleteFileAsync(path, cancellation);
+
+        public Task<bool> FileExistsAsync(string path, CancellationToken cancellation) => _client.ExistsAsync(path, cancellation);
+
+        public Task ChangePermissionsAsync(string path, string mode, CancellationToken cancellation) =>
+            // 同期の API なので、UI スレッドを止めないよう別のスレッドで
+            Task.Run(() =>
+            {
+                try
+                {
+                    // SSH.NET は 755 のような 10 進の見た目の数を受け取る
+                    _client.ChangePermissions(path, short.Parse(mode[^3..]));
+                }
+                catch (Exception)
+                {
+                    // 権限を変えられないサーバーもある。置き換えは済んでいるので成功として扱う
+                }
+            }, CancellationToken.None);
+
+        public Task SetModifiedTimeAsync(string path, CancellationToken cancellation) =>
+            Task.Run(() => SetModifiedTime(_client, path, _modified), CancellationToken.None);
+
+        public async Task<bool> TryCleanupAsync(string path)
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    if (attempt > 0 || !_client.IsConnected) _client = await owner.ReconnectAsync(timeout.Token);
+                    await _client.DeleteFileAsync(path, timeout.Token);
+                    return true;
+                }
+                catch (SftpPathNotFoundException)
+                {
+                    return true;
+                }
+                catch (SftpException)
+                {
+                    // サーバーに断られた（権限など）。つなぎ直しても同じ
+                    return false;
+                }
+                catch (Exception) { }
+            }
+            return false;
+        }
+
+        public bool IsPermissionDenied(Exception e) => e is SftpPermissionDeniedException;
+    }
+
+    /// <summary>接続をつなぎ直す（一時ファイルの後片付け用。RunAsync の中から呼ぶ）</summary>
+    private async Task<SftpClient> ReconnectAsync(CancellationToken cancellation)
+    {
+        DisposeClient();
+        return await ConnectedClientAsync(cancellation);
+    }
 
     public Task MakeDirectoryAsync(string path, CancellationToken cancellation = default) =>
         RunAsync(async (client, token) => { await client.CreateDirectoryAsync(path, token); return true; }, cancellation);

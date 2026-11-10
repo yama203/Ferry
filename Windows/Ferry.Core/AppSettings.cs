@@ -25,6 +25,10 @@ public sealed class AppSettings
     public string? UpdateDirectory { get; set; }
     /// <summary>転送・同期が終わったら通知する</summary>
     public bool NotifyOnComplete { get; set; } = true;
+    /// <summary>同時に転送する数（1〜4）。転送用の接続をこの数まで使う。変えたら次に始まる転送から効く</summary>
+    public int ConcurrentTransfers { get; set; } = 3;
+    /// <summary>サーバーにすでにあるファイルへのアップロードは、一時ファイルに送ってから置き換える（途中で切れても書きかけを残さない）</summary>
+    public bool UploadViaTemporaryFile { get; set; } = true;
     /// <summary>最後に接続できなかった接続先と、その理由（サイドバーに印を出す。接続できたら消す）</summary>
     public Dictionary<Guid, string> ConnectionProblems { get; set; } = [];
 

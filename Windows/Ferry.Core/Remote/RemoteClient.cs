@@ -24,9 +24,12 @@ public interface IRemoteClient : IAsyncDisposable
     Task DownloadAsync(string remotePath, string localPath, long? expectedSize = null,
                        TransferProgress? progress = null, CancellationToken cancellation = default);
 
-    /// <summary>アップロード先のフォルダが無ければ 1 段ずつ作る</summary>
+    /// <summary>
+    /// アップロード先のフォルダが無ければ 1 段ずつ作る。options.ViaTemporaryFile なら一時的な名前へ送ってから置き換える
+    /// （options は既存の呼び出しを変えずに済むよう最後に置く）
+    /// </summary>
     Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
-                     CancellationToken cancellation = default);
+                     CancellationToken cancellation = default, UploadOptions? options = null);
 
     Task MakeDirectoryAsync(string path, CancellationToken cancellation = default);
     Task DeleteFileAsync(string path, CancellationToken cancellation = default);

@@ -125,6 +125,40 @@ public class SyncPlannerTests
         Assert.Equal(["src", "src/app.js"], entries.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(3, entries["src/app.js"].Size);
     }
+
+    [Fact]
+    public async Task 転送の途中の一時ファイルは除外ルールに関係なく比べない()
+    {
+        using var temp = new TempDirectory();
+        System.IO.File.WriteAllText(temp.Combine("index.php"), "<?php");
+        System.IO.File.WriteAllText(temp.Combine(".index.php.ferrypart"), "<?");
+        var server = new FakeRemoteClient();
+        server.AddFolder("/www");
+        server.AddFile("/www/index.php", 5);
+        server.AddFile("/www/.style.css.ferrypart", 3);
+        // 除外ルールを空にしても外す
+        var none = new ExcludeRules([]);
+
+        var local = SyncPlanner.ScanLocal(temp.Path, none);
+        var remote = await SyncPlanner.ScanRemoteAsync("/www", server, none);
+
+        Assert.Equal(["index.php"], local.Keys);
+        Assert.Equal(["index.php"], remote.Keys);
+        // ミラーでも消さない
+        Assert.Empty(SyncPlanner.Make(local, remote, deleteExtraneous: true).Deletions);
+    }
+
+    [Fact]
+    public async Task サーバーの走査はパーミッションも覚える()
+    {
+        var server = new FakeRemoteClient();
+        server.AddFolder("/www");
+        server.Items["/www/wp-config.php"] = new RemoteItem { Name = "wp-config.php", Path = "/www/wp-config.php", Size = 1, Permissions = "rw-------" };
+
+        var remote = await SyncPlanner.ScanRemoteAsync("/www", server, ExcludeRules.Defaults);
+
+        Assert.Equal("rw-------", remote["wp-config.php"].Permissions);
+    }
 }
 
 public class PathAndPermissionTests
@@ -169,6 +203,9 @@ public class PathAndPermissionTests
     [InlineData("553", "Could not create file.", FerryErrorKind.PermissionDenied)]
     [InlineData("425", "Can't open data connection.", FerryErrorKind.DataConnectionFailed)]
     [InlineData("500", "Unknown command.", FerryErrorKind.Other)]
+    [InlineData("421", "Too many connections (8) from this IP", FerryErrorKind.TooManyConnections)]
+    [InlineData("530", "Sorry, the maximum number of clients (3) for this user are already connected.", FerryErrorKind.TooManyConnections)]
+    [InlineData("421", "Timeout.", FerryErrorKind.Other)]
     public void FTPの応答の分類(string code, string message, FerryErrorKind kind)
     {
         Assert.Equal(kind, FtpRemoteClient.FromReply(code, message).Kind);

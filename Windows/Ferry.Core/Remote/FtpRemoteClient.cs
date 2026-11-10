@@ -98,22 +98,145 @@ public sealed class FtpRemoteClient : IRemoteClient
             return true;
         }, cancellation);
 
-    public Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
-                            CancellationToken cancellation = default) =>
-        RunAsync(async (client, token) =>
+    public async Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
+                                  CancellationToken cancellation = default, UploadOptions? options = null)
+    {
+        if (options is not { ViaTemporaryFile: true })
         {
-            var file = new FileInfo(localPath);
-            var total = file.Length;
-            var modified = file.LastWriteTimeUtc;
-            await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
-            var reporter = progress is null ? null : new Progress(p => progress(p.TransferredBytes, total));
-            var status = await client.UploadFile(localPath, remotePath, FtpRemoteExists.Overwrite, false, FtpVerify.None,
-                                                 reporter, token);
-            if (status == FtpStatus.Failed)
-                throw FerryException.Other($"「{Path.GetFileName(localPath)}」をアップロードできませんでした。");
-            await SetModifiedTimeAsync(client, remotePath, modified, token);
-            return true;
-        }, cancellation);
+            await RunAsync(async (client, token) =>
+            {
+                var modified = File.GetLastWriteTimeUtc(localPath);
+                await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
+                await UploadFileAsync(client, localPath, remotePath, progress, token);
+                await SetModifiedTimeAsync(client, remotePath, modified, token);
+                return true;
+            }, cancellation);
+            return;
+        }
+        // 接続が切れてやり直すときも同じ手順を使い、済んだところから続ける
+        var replace = new ReplacingUpload(remotePath, options.Permissions);
+        try
+        {
+            await RunAsync(async (client, token) =>
+            {
+                await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
+                await replace.RunAsync(new ReplaceSteps(this, client, localPath, progress), token);
+                return true;
+            }, cancellation);
+        }
+        catch (FerryException e)
+        {
+            throw replace.Explain(e);
+        }
+    }
+
+    /// <summary>
+    /// ふつうの STOR で送る（サーバーがその場で上書きする。権限もそのまま）。FluentFTP の Overwrite は
+    /// 「SIZE → あれば DELE → STOR」なので、途中で切れるとファイルが無くなり、権限も既定に戻ってしまう。
+    /// 上書きを断るサーバー（ProFTPD の AllowOverwrite off など）で、送り始める前に STOR が断られたときだけ、消してから送り直す
+    /// </summary>
+    private static async Task UploadFileAsync(AsyncFtpClient client, string localPath, string remotePath,
+                                              TransferProgress? progress, CancellationToken token)
+    {
+        var total = new FileInfo(localPath).Length;
+        long sent = 0;
+        var reporter = new Progress(p =>
+        {
+            sent = Math.Max(sent, p.TransferredBytes);
+            progress?.Invoke(p.TransferredBytes, total);
+        });
+        FtpStatus status;
+        try
+        {
+            status = await client.UploadFile(localPath, remotePath, FtpRemoteExists.NoCheck, false, FtpVerify.None,
+                                             reporter, token);
+        }
+        catch (Exception e) when (sent == 0 && !token.IsCancellationRequested && client.IsConnected && IsCommandRejected(e))
+        {
+            status = await client.UploadFile(localPath, remotePath, FtpRemoteExists.Overwrite, false, FtpVerify.None,
+                                             reporter, token);
+        }
+        if (status == FtpStatus.Failed)
+            throw FerryException.Other($"「{Path.GetFileName(localPath)}」をアップロードできませんでした。");
+    }
+
+    /// <summary>サーバーがコマンドを断った（FluentFTP は STOR の失敗を FtpException で包む）。接続が切れた・タイムアウトは含まない</summary>
+    private static bool IsCommandRejected(Exception e) =>
+        e is FtpCommandException || e.InnerException is FtpCommandException;
+
+    /// <summary>一時ファイルへ送ってから置き換えるときの FTP の操作（RNFR / RNTO、DELE、SITE CHMOD）</summary>
+    private sealed class ReplaceSteps(FtpRemoteClient owner, AsyncFtpClient client, string localPath, TransferProgress? progress)
+        : ReplacingUpload.ISteps
+    {
+        private AsyncFtpClient _client = client;
+        /// <summary>送る前に読んでおく（送っている間にエディタで保存されても、送った内容の日時にする）</summary>
+        private readonly DateTime _modified = File.GetLastWriteTimeUtc(localPath);
+
+        public Task UploadAsync(string remotePath, CancellationToken cancellation) =>
+            UploadFileAsync(_client, localPath, remotePath, progress, cancellation);
+
+        public async Task RenameAsync(string from, string to, CancellationToken cancellation)
+        {
+            await Execute($"RNFR {from}", cancellation);
+            await Execute($"RNTO {to}", cancellation);
+        }
+
+        public Task DeleteAsync(string path, CancellationToken cancellation) => Execute($"DELE {path}", cancellation);
+
+        public Task<bool> FileExistsAsync(string path, CancellationToken cancellation) => _client.FileExists(path, cancellation);
+
+        public async Task ChangePermissionsAsync(string path, string mode, CancellationToken cancellation)
+        {
+            try
+            {
+                await _client.Execute($"SITE CHMOD {mode} {path}", cancellation);
+            }
+            catch (Exception)
+            {
+                // SITE CHMOD に対応していないサーバーもある。置き換えは済んでいるので成功として扱う
+            }
+        }
+
+        public Task SetModifiedTimeAsync(string path, CancellationToken cancellation) =>
+            FtpRemoteClient.SetModifiedTimeAsync(_client, path, _modified, cancellation);
+
+        public async Task<bool> TryCleanupAsync(string path)
+        {
+            // 中止した直後は接続が使えないことがあるので、使えなければつなぎ直してもう一度だけ試す。
+            // 応答があって断られた（権限など）ときはつなぎ直さない（つなぎ直すと、RunAsync が接続が切れたとみなしてやり直してしまう）
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    if (attempt > 0 || !_client.IsConnected) _client = await owner.ReconnectAsync(timeout.Token);
+                    var reply = await _client.Execute($"DELE {path}", timeout.Token);
+                    // 550（無い）は消えているのと同じ
+                    return reply.Success || reply.Code == "550";
+                }
+                catch (Exception) { }
+            }
+            return false;
+        }
+
+        /// <summary>FluentFTP は STOR の失敗を FtpException で包むので、中の応答も見る</summary>
+        public bool IsPermissionDenied(Exception e) =>
+            (e as FtpCommandException ?? e.InnerException as FtpCommandException) is { } command
+            && FromReply(command.CompletionCode, command.Message).Kind == FerryErrorKind.PermissionDenied;
+
+        private async Task Execute(string command, CancellationToken cancellation)
+        {
+            var reply = await _client.Execute(command, cancellation);
+            if (!reply.Success) throw new FtpCommandException(reply);
+        }
+    }
+
+    /// <summary>接続をつなぎ直す（一時ファイルの後片付け用。RunAsync の中から呼ぶ）</summary>
+    private async Task<AsyncFtpClient> ReconnectAsync(CancellationToken cancellation)
+    {
+        await DisposeClientAsync();
+        return await ConnectedClientAsync(cancellation);
+    }
 
     /// <summary>
     /// アップロードしたファイルの更新日時をローカルのファイルに合わせる（MFMT に対応しているサーバーだけ）。
@@ -339,6 +462,9 @@ public sealed class FtpRemoteClient : IRemoteClient
         var connected = _client?.IsConnected == true;
         switch (e)
         {
+            // ProFTPD などは同時接続数の上限を 530 で返すので、パスワードの間違いと区別する
+            case FtpAuthenticationException auth when IsTooManyConnections(auth.Message):
+                return FerryException.TooManyConnections(StripCode(auth.Message), e);
             case FtpAuthenticationException auth:
                 return auth.CompletionCode is "530" or null
                     ? FerryException.LoginFailed(e)
@@ -349,6 +475,9 @@ public sealed class FtpRemoteClient : IRemoteClient
                 return FerryException.Other(
                     "サーバーが FTPS（暗号化）に対応していません。方式を「FTP」にするか、サーバーの設定を確認してください。", e);
             case FtpCommandException command:
+                return FromReply(command.CompletionCode, command.Message, e);
+            // アップロードの失敗は「Error while uploading the file」で包まれるので、中のサーバーの応答で分類する
+            case FtpException { InnerException: FtpCommandException command }:
                 return FromReply(command.CompletionCode, command.Message, e);
             case FtpException { InnerException: { } inner } when inner is not FtpException:
                 return Translate(inner, cancellation);
@@ -370,9 +499,10 @@ public sealed class FtpRemoteClient : IRemoteClient
     /// <summary>FTP の応答コードから分類する（550 は「無い」と「権限が無い」の両方に使われるので文面も見る）</summary>
     internal static FerryException FromReply(string? code, string message, Exception? inner = null)
     {
-        // FluentFTP は「Code: 550 Message: Access denied.」の形にするので、サーバーの文面だけにする
-        message = System.Text.RegularExpressions.Regex.Replace(message, @"^Code:\s*\d+\s*Message:\s*", "");
+        message = StripCode(message);
         var lower = message.ToLowerInvariant();
+        // 421 は接続数の上限のほか「接続を閉じます」（タイムアウトなど）にも使われるので、文面も見る
+        if (code is "421" or "530" && IsTooManyConnections(message)) return FerryException.TooManyConnections(message, inner);
         if (code == "530") return FerryException.LoginFailed(inner);
         if (lower.Contains("permission") || lower.Contains("denied") || lower.Contains("not allowed") || code is "553" or "532")
             return FerryException.PermissionDenied(message, inner);
@@ -380,6 +510,18 @@ public sealed class FtpRemoteClient : IRemoteClient
             return FerryException.NotFound(message, inner);
         if (code is "425" or "426") return FerryException.DataConnectionFailed(inner);
         return FerryException.Other($"サーバーがエラーを返しました: {code} {message}".TrimEnd(), inner);
+    }
+
+    /// <summary>FluentFTP は「Code: 550 Message: Access denied.」の形にするので、サーバーの文面だけにする</summary>
+    private static string StripCode(string message) =>
+        System.Text.RegularExpressions.Regex.Replace(message, @"^Code:\s*\d+\s*Message:\s*", "");
+
+    /// <summary>「Too many connections」「maximum number of clients」など、同時接続数の上限を表す応答か</summary>
+    internal static bool IsTooManyConnections(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("too many") || lower.Contains("maximum number") || lower.Contains("max connections")
+               || lower.Contains("connection limit") || lower.Contains("connections from your");
     }
 
     private static SocketException? FindSocketException(Exception? e)

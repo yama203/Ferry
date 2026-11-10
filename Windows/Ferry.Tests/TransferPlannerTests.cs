@@ -28,7 +28,7 @@ public sealed class FakeRemoteClient : IRemoteClient
     public Task DownloadAsync(string remotePath, string localPath, long? expectedSize = null, TransferProgress? progress = null,
                               CancellationToken cancellation = default) => throw new NotSupportedException();
     public Task UploadAsync(string localPath, string remotePath, TransferProgress? progress = null,
-                            CancellationToken cancellation = default) => throw new NotSupportedException();
+                            CancellationToken cancellation = default, UploadOptions? options = null) => throw new NotSupportedException();
     public Task MakeDirectoryAsync(string path, CancellationToken cancellation = default) => throw new NotSupportedException();
     public Task DeleteFileAsync(string path, CancellationToken cancellation = default) => throw new NotSupportedException();
     public Task RemoveDirectoryAsync(string path, CancellationToken cancellation = default) => throw new NotSupportedException();
@@ -70,13 +70,17 @@ public class TransferPlannerTests
         var server = new FakeRemoteClient();
         server.AddFolder("/www");
         server.AddFile("/www/a.txt", 10, T);
+        server.Items["/www/a.txt"] = server.Items["/www/a.txt"] with { Permissions = "rw-------" };
 
         var batch = TransferPlanner.CollectUploads([temp.Combine("a.txt"), temp.Combine("b.txt")], "/www", ExcludeRules.Defaults);
         var marked = await TransferPlanner.MarkRemoteConflictsAsync(batch, server);
 
         Assert.True(marked[0].DestinationExists);
         Assert.Equal(T, marked[0].DestinationModified);
+        // 一時ファイルから置き換えた後に戻す権限
+        Assert.Equal("rw-------", marked[0].DestinationPermissions);
         Assert.False(marked[1].DestinationExists);
+        Assert.Null(marked[1].DestinationPermissions);
     }
 
     [Fact]

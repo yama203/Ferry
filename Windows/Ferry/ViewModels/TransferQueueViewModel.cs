@@ -34,6 +34,13 @@ public sealed partial class TransferItem : ObservableObject
     public partial string? ErrorMessage { get; private set; }
 
     public CancellationTokenSource? Cancellation { get; set; }
+    /// <summary>今の転送が 1 バイトでも進んだか（画面用に間引く前の進み具合。別のスレッドから書かれる）</summary>
+    private volatile bool _progressed;
+    public bool HasProgressed
+    {
+        get => _progressed;
+        set => _progressed = value;
+    }
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public TransferItem(PlannedTransfer plan)
@@ -80,10 +87,11 @@ public sealed record PendingConflict(TransferDirection Direction, IReadOnlyList<
 }
 
 /// <summary>
-/// 転送の待ち行列。転送は専用の接続で 1 件ずつ処理し、フォルダの中身の一覧は一覧表示用の接続で取る
-/// （転送中でもフォルダを移動できるように）。
+/// 転送の待ち行列。転送は専用の接続（設定の「同時に転送する数」まで）で先頭から順に同時に処理し、
+/// フォルダの中身の一覧は一覧表示用の接続で取る（転送中でもフォルダを移動できるように）。
+/// 接続の増やし方・減らし方は Core の TransferLanes に任せる。
 /// </summary>
-public sealed partial class TransferQueueViewModel : ObservableObject
+public sealed partial class TransferQueueViewModel : ObservableObject, ITransferQueue<TransferItem>
 {
     public ObservableCollection<TransferItem> Items { get; } = [];
 
@@ -103,14 +111,18 @@ public sealed partial class TransferQueueViewModel : ObservableObject
     /// <summary>待ち行列が空になったとき（両ペインの再読み込み用）</summary>
     public event EventHandler? Idle;
 
-    private IRemoteClient _client;
+    private readonly TransferLanes<TransferItem> _lanes;
     private readonly Func<IRemoteClient> _lister;
     private readonly string _serverName;
-    private bool _running;
 
-    public TransferQueueViewModel(IRemoteClient client, Func<IRemoteClient> lister, string serverName)
+    /// <summary>createClient は転送用の接続を作る（2 本目以降は必要になったときに呼ぶ）</summary>
+    public TransferQueueViewModel(Func<IRemoteClient> createClient, Func<IRemoteClient> lister, string serverName)
     {
-        _client = client;
+        _lanes = new TransferLanes<TransferItem>(createClient, this)
+        {
+            MaxConcurrency = () => AppServices.Settings.ConcurrentTransfers,
+        };
+        _lanes.Idle += (_, _) => Idle?.Invoke(this, EventArgs.Empty);
         _lister = lister;
         _serverName = serverName;
         Items.CollectionChanged += (_, _) => UpdateCounts();
@@ -122,15 +134,13 @@ public sealed partial class TransferQueueViewModel : ObservableObject
     private static ExcludeRules Rules => AppServices.Store.ExcludeRules;
 
     /// <summary>接続時に入力されたパスワード（保存しなかった場合も転送に使う）</summary>
-    public void SetPassword(string? password) => _client.SetPassword(password);
+    public void SetPassword(string? password) => _lanes.SetPassword(password);
 
-    /// <summary>接続設定が変わったとき。転送中のものは止める</summary>
-    public async Task ReplaceClientAsync(IRemoteClient client)
+    /// <summary>接続設定が変わったとき。転送中のものは止め、転送用の接続を全部作り直す</summary>
+    public async Task ReplaceClientAsync(Func<IRemoteClient> createClient)
     {
         CancelAll();
-        var old = _client;
-        _client = client;
-        await old.DisposeAsync();
+        await _lanes.ReplaceAsync(createClient);
     }
 
     // MARK: 追加
@@ -190,8 +200,11 @@ public sealed partial class TransferQueueViewModel : ObservableObject
     public IReadOnlyList<TransferItem> EnqueuePlanned(IReadOnlyList<PlannedTransfer> batch) =>
         batch.Count == 0 ? [] : Start(batch, batch[0].Direction, notifies: false);
 
-    /// <summary>エディタで保存されたファイルをそのままアップロードする（確認なし。失敗したときの知らせは呼び出し側で出す）</summary>
-    public TransferItem UploadEdited(string localPath, string remotePath)
+    /// <summary>
+    /// エディタで保存されたファイルをそのままアップロードする（確認なし。失敗したときの知らせは呼び出し側で出す）。
+    /// exists・permissions はサーバー側の今のファイル（一時ファイルから置き換えるか、置き換えた後の権限）
+    /// </summary>
+    public TransferItem UploadEdited(string localPath, string remotePath, bool exists, string? permissions)
     {
         // 保存の直後に消された・置き換え中などで大きさを読めなくても、ここでは落とさない（アップロードの失敗として出る）
         long size = 0;
@@ -200,6 +213,7 @@ public sealed partial class TransferQueueViewModel : ObservableObject
         var plan = new PlannedTransfer
         {
             Direction = TransferDirection.Upload, LocalPath = localPath, RemotePath = remotePath, Size = size,
+            DestinationExists = exists, DestinationPermissions = permissions,
         };
         return Start([plan], TransferDirection.Upload, notifies: false)[0];
     }
@@ -291,79 +305,96 @@ public sealed partial class TransferQueueViewModel : ObservableObject
         HasItems = Items.Count > 0;
     }
 
-    // MARK: 実行（UI スレッドで回し、通信は接続の中で非同期に行う）
+    // MARK: 実行（UI スレッドで回し、通信は接続の中で非同期に行う。await の続きも UI スレッドに戻る）
 
-    private async void Pump()
+    private void Pump() => _lanes.Pump();
+
+    int ITransferQueue<TransferItem>.WaitingCount => Items.Count(i => i.State == TransferState.Waiting);
+
+    TransferItem? ITransferQueue<TransferItem>.TakeNext()
     {
-        if (_running) return;
-        _running = true;
-        try
-        {
-            while (Items.FirstOrDefault(i => i.State == TransferState.Waiting) is { } next)
-            {
-                await RunAsync(next);
-            }
-        }
-        finally
-        {
-            _running = false;
-        }
-        Idle?.Invoke(this, EventArgs.Empty);
+        if (Items.FirstOrDefault(i => i.State == TransferState.Waiting) is not { } next) return null;
+        next.Cancellation = new CancellationTokenSource();
+        next.HasProgressed = false;
+        next.SetState(TransferState.Running);
+        return next;
     }
 
-    private async Task RunAsync(TransferItem item)
+    async Task ITransferQueue<TransferItem>.RunAsync(TransferItem item, IRemoteClient client)
     {
-        item.SetState(TransferState.Running);
-        using var cancellation = new CancellationTokenSource();
-        item.Cancellation = cancellation;
+        var cancellation = item.Cancellation!;
         // 進み具合は頻繁に届くので、画面の更新は 0.1 秒ごとに間引く
         var lastReport = 0L;
         TransferProgress progress = (done, total) =>
         {
+            // 接続を減らすかの判断に使うので、間引く前に覚える
+            if (done > 0) item.HasProgressed = true;
             var now = Environment.TickCount64;
             if (now - Interlocked.Read(ref lastReport) < 100) return;
             Interlocked.Exchange(ref lastReport, now);
             AppServices.OnUi(() =>
             {
+                // 待ちに戻した後に遅れて届いた分は捨てる
+                if (item.State != TransferState.Running || item.Cancellation != cancellation) return;
                 item.Done = done;
                 if (total > 0) item.Total = total;
             });
         };
         var plan = item.Plan;
-        var client = _client;
-        try
+        if (plan.Direction == TransferDirection.Upload)
         {
-            if (plan.Direction == TransferDirection.Upload)
+            // サーバーにすでにあるファイルだけ、一時ファイルに送ってから置き換える（新しいファイルは壊れるものが無いので直接）
+            var options = new UploadOptions
             {
-                await client.UploadAsync(plan.LocalPath, plan.RemotePath, progress, cancellation.Token);
-            }
-            else
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(plan.LocalPath)!);
-                await client.DownloadAsync(plan.RemotePath, plan.LocalPath, plan.Size, progress, cancellation.Token);
-                // 更新日時をサーバーと揃える（同期で「変更あり」と判定されないように）
-                if (plan.SourceModified is { } modified) File.SetLastWriteTimeUtc(plan.LocalPath, modified);
-            }
+                ViaTemporaryFile = AppServices.Settings.UploadViaTemporaryFile && plan.DestinationExists,
+                Permissions = plan.DestinationPermissions,
+            };
+            await client.UploadAsync(plan.LocalPath, plan.RemotePath, progress, cancellation.Token, options);
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(plan.LocalPath)!);
+            await client.DownloadAsync(plan.RemotePath, plan.LocalPath, plan.Size, progress, cancellation.Token);
+            // 更新日時をサーバーと揃える（同期で「変更あり」と判定されないように）
+            if (plan.SourceModified is { } modified) File.SetLastWriteTimeUtc(plan.LocalPath, modified);
+        }
+    }
+
+    void ITransferQueue<TransferItem>.Complete(TransferItem item, Exception? error)
+    {
+        var cancelled = item.Cancellation?.IsCancellationRequested == true;
+        item.Cancellation?.Dispose();
+        item.Cancellation = null;
+        if (error is null)
+        {
             item.Done = item.Total;
             item.SetState(TransferState.Finished);
         }
-        catch (Exception e) when (cancellation.IsCancellationRequested || e is FerryException { Kind: FerryErrorKind.Cancelled })
+        else if (cancelled || error is FerryException { Kind: FerryErrorKind.Cancelled })
         {
             item.SetState(TransferState.Cancelled);
         }
-        catch (Exception e)
+        else
         {
-            item.SetState(TransferState.Failed, BrowserViewModel.Describe(e));
+            item.SetState(TransferState.Failed, BrowserViewModel.Describe(error));
         }
-        finally
-        {
-            item.Cancellation = null;
-        }
+    }
+
+    bool ITransferQueue<TransferItem>.HasProgressed(TransferItem item) => item.HasProgressed;
+
+    bool ITransferQueue<TransferItem>.TryRequeue(TransferItem item)
+    {
+        if (item.Cancellation?.IsCancellationRequested == true) return false;
+        item.Cancellation?.Dispose();
+        item.Cancellation = null;
+        item.Done = 0;
+        item.SetState(TransferState.Waiting);
+        return true;
     }
 
     public async Task DisposeClientAsync()
     {
         CancelAll();
-        await _client.DisposeAsync();
+        await _lanes.DisposeAsync();
     }
 }

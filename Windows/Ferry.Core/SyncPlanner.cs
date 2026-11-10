@@ -6,7 +6,14 @@ namespace Ferry.Core;
 /// <summary>ローカルとリモートのフォルダを比べて、転送・削除する項目を決める</summary>
 public static class SyncPlanner
 {
-    public sealed record Entry(bool IsDirectory, long? Size, DateTime? Modified);
+    /// <summary>Permissions はサーバー側だけ（"rwxr-xr-x" 形式。アップロードで置き換えた後に戻す）</summary>
+    public sealed record Entry(bool IsDirectory, long? Size, DateTime? Modified, string? Permissions = null);
+
+    /// <summary>
+    /// 転送の途中の一時ファイル（".&lt;名前&gt;.ferrypart" など）は、除外ルールに関係なく比べない
+    /// （転送するとサーバーに一時ファイルが増え、ミラーでは消されてしまう。一覧には出るので、残っていれば気づける）
+    /// </summary>
+    public static bool IsTransferPart(string name) => name.EndsWith(".ferrypart", StringComparison.Ordinal);
 
     public enum ChangeReason { New, Changed }
 
@@ -46,7 +53,7 @@ public static class SyncPlanner
             }
             foreach (var child in children)
             {
-                if (rules.Excludes(child.Name)) continue;
+                if (rules.Excludes(child.Name) || IsTransferPart(child.Name)) continue;
                 var relative = current.Relative.Length == 0 ? child.Name : current.Relative + "/" + child.Name;
                 if (child is DirectoryInfo directory)
                 {
@@ -78,9 +85,9 @@ public static class SyncPlanner
             onFolder?.Invoke(directory);
             foreach (var item in await client.ListAsync(directory, cancellation))
             {
-                if (rules.Excludes(item.Name)) continue;
+                if (rules.Excludes(item.Name) || IsTransferPart(item.Name)) continue;
                 var relative = relativeDirectory.Length == 0 ? item.Name : relativeDirectory + "/" + item.Name;
-                result[relative] = new Entry(item.IsDirectory, item.Size, item.Modified);
+                result[relative] = new Entry(item.IsDirectory, item.Size, item.Modified, item.Permissions);
                 if (item.IsDirectory) pending.Push(relative);
             }
         }

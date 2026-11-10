@@ -32,6 +32,7 @@ public sealed partial class SessionView : UserControl
         ApplySplit(AppServices.Settings.PaneSplit);
         viewModel.PropertyChanged += ViewModel_PropertyChanged;
         viewModel.Transfers.AskConflict = AskConflictAsync;
+        viewModel.AskEditConflict = AskEditConflictAsync;
     }
 
     // MARK: 同期・ブックマーク・編集中
@@ -184,6 +185,20 @@ public sealed partial class SessionView : UserControl
             2 => ConflictPolicy.Skip,
             _ => ConflictPolicy.NewerOnly,
         };
+    }
+
+    /// <summary>
+    /// エディタで開いた後に、他の人がサーバー側のファイルを変えた・消したとき。上書きするかを聞く。
+    /// 別の接続先を表示している（この画面が表示されていない）こともあるので、ウィンドウの XamlRoot を使う
+    /// </summary>
+    private async Task<bool> AskEditConflictAsync(EditedFile file, EditConflict conflict)
+    {
+        if ((XamlRoot ?? App.MainWindow?.Content.XamlRoot) is not { } root) return false;
+        var name = Ferry.Core.RemotePath.Name(file.RemotePath);
+        var what = conflict == EditConflict.Deleted ? "削除されています" : "変更されています";
+        return await Dialogs.ConfirmAsync(root, $"「{name}」はサーバーで{what}",
+            $"サーバー（{ViewModel.Server.Name}）の「{name}」は、エディタで開いた後に{what}。上書きしますか？",
+            "上書きする", destructive: true, cancel: "アップロードしない");
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
