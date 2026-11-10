@@ -10,6 +10,8 @@ namespace Ferry.Views;
 public static class FtpsSurveyDialog
 {
     private const string DialogTitle = "FTPS に切り替えられる接続先を調べる";
+    /// <summary>同時に調べる件数（説明文にも出す）</summary>
+    private const int Concurrency = 3;
 
     /// <summary>
     /// 調べて、切り替える接続先を選んでもらう。「選んだ接続先を FTPS に切り替える」が押されたら、その一覧を返す
@@ -39,7 +41,7 @@ public static class FtpsSurveyDialog
         content.Children.Add(new TextBlock
         {
             Text = $"暗号化なしの FTP の接続先が {survey.Entries.Count} 件あります（パスワードもファイルの中身もそのまま流れます）。"
-                   + "「調べる」を押すと、保存されているパスワードで、FTPS（Explicit）でつながるかを 1 件ずつ試します。調べるだけでは設定は変わりません。",
+                   + $"「調べる」を押すと、保存されているパスワードで、FTPS（Explicit）でつながるかを、同時に {Concurrency} 件ずつ試します。調べるだけでは設定は変わりません。",
             TextWrapping = TextWrapping.Wrap,
         });
         content.Children.Add(new ScrollViewer { Content = list, MaxHeight = 380, Padding = new Thickness(0, 0, 16, 0) });
@@ -88,7 +90,7 @@ public static class FtpsSurveyDialog
             // パスワードは、保管庫に足すなどの副作用が無い読み方で取る
             var running = survey.RunAsync(
                 (server, token) => FtpsCheck.CheckAsync(server, AppServices.Passwords.KnownPassword(server.Id), token),
-                concurrency: 3, cancellation: cancel.Token);
+                concurrency: Concurrency, cancellation: cancel.Token);
             Refresh();
             await running;
             // 対応していないと分かった接続先には、接続中の画面で「暗号化されていません」の印を出さない

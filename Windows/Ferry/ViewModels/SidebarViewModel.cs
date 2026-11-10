@@ -56,7 +56,7 @@ public sealed partial class SidebarViewModel : ObservableObject
         _collapsed = [.. AppServices.Settings.CollapsedFolders];
     }
 
-    public bool IsSearching => SearchText.Trim().Length > 0;
+    public bool IsSearching => ServerSearch.IsActive(SearchText);
 
     partial void OnSearchTextChanged(string value) => Rebuild();
 
@@ -77,7 +77,8 @@ public sealed partial class SidebarViewModel : ObservableObject
         var rows = new List<SidebarRow>();
         if (IsSearching)
         {
-            var results = Sorted(store.Servers.Where(Matches));
+            var terms = ServerSearch.Terms(SearchText);
+            var results = Sorted(store.Servers.Where(s => Matches(s, terms)));
             rows.Add(new SidebarRow { IsHeader = true, Title = "検索結果" });
             rows.AddRange(results.Select(s => ServerRow(s, store.IsShared(s.Id))));
             IsSearchEmpty = results.Count == 0;
@@ -164,12 +165,10 @@ public sealed partial class SidebarViewModel : ObservableObject
     private static List<ServerConfig> Sorted(IEnumerable<ServerConfig> servers) =>
         servers.OrderBy(s => s.Name, SyncPlanner.NaturalOrder).ToList();
 
-    /// <summary>名前・ホスト・ユーザー名・フォルダ名。空白区切りで AND。</summary>
-    private bool Matches(ServerConfig server)
+    /// <summary>名前・ホスト・ユーザー名・フォルダ名。空白区切りで AND（比べ方はファイル一覧の絞り込みと同じ。ServerSearch）。</summary>
+    private static bool Matches(ServerConfig server, IReadOnlyList<string> terms)
     {
         var folderName = AppServices.Store.Folders.FirstOrDefault(f => f.Id == server.FolderId)?.Name ?? "";
-        var haystack = string.Join("\n", server.Name, server.Host, server.Username, folderName);
-        return SearchText.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-            .All(term => haystack.Contains(term, StringComparison.CurrentCultureIgnoreCase));
+        return ServerSearch.Matches(server, folderName, terms);
     }
 }
