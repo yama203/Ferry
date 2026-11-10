@@ -59,6 +59,12 @@ struct ServerEditView: View {
                             Text(proto.displayName).tag(proto)
                         }
                     }
+                    if draft.serverProtocol == .ftp {
+                        Label("暗号化されません（パスワードもそのまま流れます）。サーバーが対応していれば FTPS をおすすめします。",
+                              systemImage: "lock.open")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                    }
                     TextField("ホスト", text: $draft.host, prompt: Text("ftp.example.com"))
                     TextField("ポート", text: $portText, prompt: Text(String(draft.serverProtocol.defaultPort)))
                     TextField("ユーザー名", text: $draft.username)

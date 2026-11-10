@@ -18,6 +18,11 @@ public final class RemoteClient: @unchecked Sendable {
 
     /// 通信ログを stderr に出す（PASS は伏せ字）
     public var debugLog = false
+    /// ユーザーが承認した、変わった後のホスト鍵（SFTP）。この鍵のときだけ known_hosts の記録を置き換えて接続する。
+    /// 置き換えたら消す（以後は known_hosts の記録どおりに照合する）
+    private var approvedHostKey: HostKey?
+    /// FTPS のサーバー証明書の名前を読む（FTPS に切り替えられるかを調べるとき）
+    private var readsCertificateNames = false
 
     /// FTPS の証明書検証に使うルート証明書（アプリに同梱したもの）。nil なら libcurl の既定。
     public static var caBundlePath: String?
@@ -39,6 +44,12 @@ public final class RemoteClient: @unchecked Sendable {
         queue.async { self.password = password }
     }
 
+    /// 画面で見て承認した、変わった後のホスト鍵。次の接続で、サーバーの鍵がこれと同じときだけ known_hosts の記録を置き換える
+    /// （承認した後に別の鍵にすり替わっていたら接続しない）。nil で取り消す
+    public func approveHostKey(_ key: HostKey?) {
+        queue.async { self.approvedHostKey = key }
+    }
+
     // MARK: - 公開 API
 
     /// ログイン直後のフォルダ（ホームディレクトリ）
@@ -48,6 +59,20 @@ public final class RemoteClient: @unchecked Sendable {
             handle.set(CURLOPT_NOBODY, true)
             try handle.perform()
             return handle.entryPath ?? "/"
+        }
+    }
+
+    /// ログインして、ホームディレクトリとサーバー証明書の名前（FTPS。CN と DNS 名）を返す
+    func homeDirectoryAndCertificateNames() async throws -> (home: String, names: [String]) {
+        try await run { handle in
+            self.readsCertificateNames = true
+            defer { self.readsCertificateNames = false }
+            handle.reset()
+            self.configure(handle)
+            handle.set(CURLOPT_URL, self.baseURL + "/")
+            handle.set(CURLOPT_NOBODY, true)
+            try handle.perform()
+            return (handle.entryPath ?? "/", handle.certificateNames)
         }
     }
 
@@ -185,12 +210,19 @@ public final class RemoteClient: @unchecked Sendable {
                     self.handle = handle
                     handle.reset()
                     self.configure(handle)
+                    defer { self.forgetApprovedHostKeyIfRecorded(handle) }
                     continuation.resume(returning: try body(handle))
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
         }
+    }
+
+    /// 承認した鍵が known_hosts に記録されたら、承認を消す（キューの中から呼ぶ）
+    private func forgetApprovedHostKeyIfRecorded(_ handle: CurlHandle) {
+        guard handle.takeAcceptedApprovedKey(), approvedHostKey != nil else { return }
+        approvedHostKey = nil
     }
 
     /// 一覧を取る（キューの中から、設定を初期化したハンドルで呼ぶ）。MLSD・LIST -a に対応していなければ LIST に切り替える
@@ -342,6 +374,9 @@ public final class RemoteClient: @unchecked Sendable {
                 }
                 handle.set(CURLOPT_SSL_VERIFYPEER, server.verifyCertificate)
                 handle.set(CURLOPT_SSL_VERIFYHOST, server.verifyCertificate ? 2 : 0)
+                if readsCertificateNames {
+                    handle.set(CURLOPT_CERTINFO, true)
+                }
             }
         } else {
             handle.set(CURLOPT_SSH_AUTH_TYPES,
@@ -352,7 +387,7 @@ public final class RemoteClient: @unchecked Sendable {
             let knownHosts = Self.knownHostsURL
             try? FileManager.default.createDirectory(at: knownHosts.deletingLastPathComponent(),
                                                      withIntermediateDirectories: true)
-            handle.useKnownHosts(at: knownHosts.path)
+            handle.useKnownHosts(at: knownHosts.path, approvedKey: approvedHostKey)
         }
 
         if debugLog {

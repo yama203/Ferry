@@ -125,6 +125,12 @@ struct SessionView: View {
             .help("左右で開いているフォルダを同期")
             .disabled(session.status != .connected)
 
+            // 暗号化なしの FTP でつないでいるとき（対応していないと分かったもの・「今後表示しない」を選んだものには出さない）
+            if session.server.serverProtocol == .ftp, session.status == .connected,
+               !FTPSNotice.shared.isHidden(session.server.id) {
+                FTPSBadge(session: session)
+            }
+
             Button(action: onEdit) {
                 Label("接続設定", systemImage: "slider.horizontal.3")
             }
@@ -214,7 +220,7 @@ struct SessionView: View {
         let place = "\(server.serverProtocol.displayName)  \(server.username)@\(server.host):\(server.effectivePort)"
         switch session.status {
         case .connecting: return "接続中…  " + place
-        case .failed, .needsPassword, .untrustedCertificate: return "未接続  " + place
+        case .failed, .needsPassword, .untrustedCertificate, .hostKeyChanged: return "未接続  " + place
         default: return place
         }
     }
@@ -239,6 +245,29 @@ struct SessionView: View {
                     store.upsert(server)
                 }
                 .buttonStyle(.borderedProminent)
+                Button("接続設定を編集…", action: onEdit)
+            }
+        case .hostKeyChanged(let key):
+            ContentUnavailableView {
+                Label("サーバーのホスト鍵が、前回と変わっています", systemImage: "exclamationmark.shield")
+            } description: {
+                VStack(spacing: 10) {
+                    Text("サーバーの移転や再構築で変わることがあります。心当たりが無い場合は、別のサーバーになりすまされている可能性があるので、接続しないでサーバーの管理者に確かめてください。")
+                    VStack(spacing: 2) {
+                        Text("新しい鍵（\(key.typeName)）")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Text(key.fingerprint)
+                            .font(.body.monospaced())
+                            .textSelection(.enabled)
+                    }
+                }
+            } actions: {
+                Button("新しい鍵を信頼して接続", role: .destructive) {
+                    Task { await session.trustHostKey(key) }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
                 Button("接続設定を編集…", action: onEdit)
             }
         case .needsPassword(let message):

@@ -15,6 +15,7 @@ struct ServerSidebar: View {
     @State private var folderNameTarget: FolderNameTarget?
     @State private var folderName = ""
     @State private var searchText = ""
+    @State private var isCheckingFTPS = false
 
     private enum FolderNameTarget: Identifiable {
         case new(shared: Bool)
@@ -62,6 +63,9 @@ struct ServerSidebar: View {
         .safeAreaInset(edge: .bottom) {
             footer
         }
+        .sheet(isPresented: $isCheckingFTPS) {
+            FTPSCheckView()
+        }
         .toolbar {
             ToolbarItem {
                 Menu {
@@ -73,6 +77,8 @@ struct ServerSidebar: View {
                     }
                     Divider()
                     Button("Transmit から読み込む…") { store.chooseTransmitFile() }
+                    Divider()
+                    Button("FTPS に切り替えられる接続先を調べる…") { isCheckingFTPS = true }
                 } label: {
                     Label("追加", systemImage: "plus")
                 }

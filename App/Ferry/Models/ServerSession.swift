@@ -24,6 +24,8 @@ final class ServerSession {
         case needsPassword(String?)
         /// FTPS の証明書を検証できなかった（自己署名など）
         case untrustedCertificate(String)
+        /// SFTP のホスト鍵が前回（known_hosts の記録）と違う。サーバーが出した新しい鍵付き
+        case hostKeyChanged(HostKey)
     }
 
     let server: ServerConfig
@@ -124,6 +126,8 @@ final class ServerSession {
             status = .needsPassword(error.localizedDescription)
         } catch let error as FerryError where error.kind == .untrustedCertificate {
             status = .untrustedCertificate(error.localizedDescription)
+        } catch let error as FerryError where error.kind == .hostKeyChanged && error.hostKey != nil {
+            status = .hostKeyChanged(error.hostKey!)
         } catch {
             status = .failed(error.localizedDescription)
         }
@@ -139,6 +143,9 @@ final class ServerSession {
         // パスワードを保存していないだけのときは印を出さない（ログインに失敗したときだけ理由がある）
         case .needsPassword(let message?):
             ConnectionProblems.shared.set("ログインできませんでした（パスワードが変わったかもしれません）。\(message)", for: server.id)
+        case .hostKeyChanged(let key):
+            ConnectionProblems.shared.set("サーバーのホスト鍵が、前回と変わっています（新しい鍵 \(key.typeName) \(key.fingerprint)）。"
+                                          + "心当たりが無ければ、接続しないでサーバーの管理者に確かめてください", for: server.id)
         default:
             break
         }
@@ -155,6 +162,20 @@ final class ServerSession {
         hasPassword = true
         status = .idle
         await connect()
+    }
+
+    /// 変わったホスト鍵を画面で承認して、つなぎ直す。サーバーの鍵がこの鍵のときだけ known_hosts の記録を置き換える
+    /// （承認した後に別の鍵にすり替わっていたら、また「変わっています」になる）。記録が新しい鍵になれば、
+    /// 転送用・プレビュー用の接続も次からその記録で照合してつながる
+    func trustHostKey(_ key: HostKey) async {
+        guard case .hostKeyChanged(let shown) = status, shown == key else { return }
+        remote.client?.approveHostKey(key)
+        status = .idle
+        await connect()
+        // つながらなかった（パスワードが違うなど）ときは承認を残さない。次に変わっていると出たら、また画面で確かめる
+        if status != .connected {
+            remote.client?.approveHostKey(nil)
+        }
     }
 
     /// ブックマークした組み合わせを左右のペインで開く。未接続なら接続後に開く。
@@ -501,6 +522,11 @@ final class SessionManager {
     func close(_ id: UUID) {
         sessions[id]?.close()
         sessions[id] = nil
+    }
+
+    /// その接続先で終わっていない転送があるか（接続設定を変えるとつなぎ直して転送が止まるので、その前に確かめる）
+    func hasActiveTransfers(_ id: UUID) -> Bool {
+        (sessions[id]?.transfers.activeCount ?? 0) > 0
     }
 
     /// 終わっていない転送の数（更新のための再起動の前に確かめる）
