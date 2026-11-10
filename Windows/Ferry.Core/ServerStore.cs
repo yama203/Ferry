@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Ferry.Core.Import;
@@ -43,6 +44,11 @@ public sealed class ServerStore : IDisposable
     private Dictionary<string, SharedServerOverride> _localShared = new(StringComparer.OrdinalIgnoreCase);
     private FileSystemWatcher? _watcher;
     private Timer? _debounce;
+    /// <summary>
+    /// あるのに読めなかったファイル（壊れた JSON、Mac 版や新しい版が足した知らない値など）。
+    /// そのまま上書きすると中身が消えるので、次に保存するときに別の名前で残してから書く
+    /// </summary>
+    private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
 
     private Dictionary<string, SharedServerOverride> SharedOverridesForThisPc =>
         KeepsPerPcSettingsLocally ? _localShared : _sharedOverrides;
@@ -146,33 +152,40 @@ public sealed class ServerStore : IDisposable
 
     public void Load()
     {
-        if (_localOverridesPath is not null)
+        if (_localOverridesPath is not null && ReadOrRemember<LocalOverrides>(_localOverridesPath) is { } local)
         {
-            try
-            {
-                var local = FerryJson.Deserialize<LocalOverrides>(File.ReadAllText(_localOverridesPath));
-                _localPersonal = new(local?.Personal ?? [], StringComparer.OrdinalIgnoreCase);
-                _localShared = new(local?.Shared ?? [], StringComparer.OrdinalIgnoreCase);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
+            _localPersonal = new(local.Personal ?? [], StringComparer.OrdinalIgnoreCase);
+            _localShared = new(local.Shared ?? [], StringComparer.OrdinalIgnoreCase);
         }
 
-        FileContents? loaded;
-        try
-        {
-            loaded = FerryJson.Deserialize<FileContents>(File.ReadAllText(FilePath));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return;
-        }
-        if (loaded is null) return;
+        if (ReadOrRemember<FileContents>(FilePath) is not { } loaded) return;
         _personalServers = loaded.Servers;
         _personalFolders = loaded.Folders;
         _sharedOverrides = new(loaded.SharedOverrides ?? [], StringComparer.OrdinalIgnoreCase);
         ExcludeRules = loaded.ExcludePatterns is { } patterns ? new ExcludeRules(patterns) : ExcludeRules.Defaults;
         _extra = loaded.Extra;
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>読めなかったら null。ファイルがあるのに読めなかったときは、上書きする前に残すために覚えておく</summary>
+    private T? ReadOrRemember<T>(string path) where T : class
+    {
+        try
+        {
+            if (FerryJson.Deserialize<T>(File.ReadAllText(path)) is { } value)
+            {
+                lock (_unreadable) _unreadable.Remove(path);
+                return value;
+            }
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // まだ無いだけ（初回の起動など）
+            return null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
+        lock (_unreadable) _unreadable.Add(path);
+        return null;
     }
 
     public void Save()
@@ -186,8 +199,8 @@ public sealed class ServerStore : IDisposable
             Extra = _extra,
         };
         _lastWrite = DateTime.UtcNow;
-        FerryJson.WriteAtomically(FilePath, FerryJson.Serialize(contents));
-        if (_localOverridesPath is not null)
+        if (KeepUnreadable(FilePath)) FerryJson.WriteAtomically(FilePath, FerryJson.Serialize(contents));
+        if (_localOverridesPath is not null && KeepUnreadable(_localOverridesPath))
         {
             FerryJson.WriteAtomically(_localOverridesPath, FerryJson.Serialize(new LocalOverrides
             {
@@ -196,6 +209,43 @@ public sealed class ServerStore : IDisposable
             }));
         }
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// 読めなかったファイルを上書きする前に、同じフォルダに別の名前で残す（1 回だけ）。
+    /// 戻り値は上書きしてよいか（残せなかったときは、元の内容を消さないよう今回は書かない）
+    /// </summary>
+    private bool KeepUnreadable(string path)
+    {
+        lock (_unreadable)
+        {
+            if (!_unreadable.Contains(path)) return true;
+        }
+        try
+        {
+            if (File.Exists(path)) File.Copy(path, UnreadableCopyPath(path, DateTime.Now));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+        lock (_unreadable) _unreadable.Remove(path);
+        return true;
+    }
+
+    /// <summary>「servers（読めなかったもの 2026-11-10 153000）.json」の形（Mac 版も同じ名前にする）</summary>
+    internal static string UnreadableCopyPath(string path, DateTime now)
+    {
+        var directory = Path.GetDirectoryName(path) ?? "";
+        var extension = Path.GetExtension(path);
+        var name = $"{Path.GetFileNameWithoutExtension(path)}（読めなかったもの {now.ToString("yyyy-MM-dd HHmmss", CultureInfo.InvariantCulture)}）";
+        var candidate = Path.Combine(directory, name + extension);
+        // 同じ秒に 2 回残すときは番号を付ける
+        for (var number = 2; File.Exists(candidate); number++)
+        {
+            candidate = Path.Combine(directory, $"{name} {number}{extension}");
+        }
+        return candidate;
     }
 
     /// <summary>

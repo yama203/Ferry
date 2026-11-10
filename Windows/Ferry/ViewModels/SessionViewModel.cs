@@ -69,6 +69,12 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         {
             await Local.RefreshAsync();
             await Remote.RefreshAsync();
+            // 再読み込みに成功するとエラー表示が消えるので、エディタからのアップロードの失敗は後から出す
+            if (_editUploadFailure is { } failure)
+            {
+                Remote.ErrorMessage = failure;
+                _editUploadFailure = null;
+            }
         };
         // 秘密鍵はパスフレーズ無しの場合もあるので、パスワード無しでも接続を試す
         _hasPassword = password is not null || server.PrivateKeyPath is { Length: > 0 } || server.Username == "anonymous";
@@ -110,19 +116,23 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
     private IRemoteClient PreviewClient =>
         _previewClient ??= RemoteClientFactory.Create(Server, _password ?? AppServices.Passwords.GetPassword(Server.Id));
 
-    private static string CacheRoot(string kind) =>
-        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Ferry", kind);
-
-    /// <summary>サーバーのパスとサイズごとの置き場所（同じサイズのものは使い回す）</summary>
+    /// <summary>
+    /// サーバーのパス・サイズ・更新日時ごとの置き場所（どれも同じなら使い回す。
+    /// サイズの変わらない編集もあるので更新日時も見る）
+    /// </summary>
     private string PreviewCachePath(Models.FileEntry entry)
     {
+        // 更新日時が分からないものは毎回別の場所にする（プレビューで開いているファイルを上書きしないように）
+        var modified = entry.Modified?.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture)
+                       ?? Guid.NewGuid().ToString("N");
         var key = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
-            System.Text.Encoding.UTF8.GetBytes($"{Server.Id}|{entry.Path}|{entry.Size}")))[..16];
-        return System.IO.Path.Combine(CacheRoot("Preview"), key, TransferPlanner.LocalName(entry.Name));
+            System.Text.Encoding.UTF8.GetBytes($"{Server.Id}|{entry.Path}|{entry.Size}|{modified}")))[..16];
+        return System.IO.Path.Combine(TempFiles.Preview, key, TransferPlanner.LocalName(entry.Name));
     }
 
+    /// <summary>更新日時が分からないものは、変わったかどうか判断できないので使い回さない（毎回ダウンロードする）</summary>
     public string? CachedPreviewPath(Models.FileEntry entry) =>
-        PreviewCachePath(entry) is var path && File.Exists(path) ? path : null;
+        entry.Modified is not null && PreviewCachePath(entry) is var path && File.Exists(path) ? path : null;
 
     /// <summary>プレビュー用に一時フォルダへダウンロードする（転送一覧には出さない）。50MB を超えるものはしない</summary>
     public async Task<string?> PreviewPathAsync(Models.FileEntry entry)
@@ -166,7 +176,8 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
     /// <summary>サーバー側で小さいファイルを 1 つ選んだら、スペースを押す前に裏でダウンロードしておく</summary>
     public void PrefetchPreview(Models.FileEntry entry)
     {
-        if (!IsConnected || entry.IsDirectory || entry.Size is not { } size || size > PrefetchSizeLimit
+        // 更新日時が分からないものは、先にダウンロードしておいても使い回せないのでしない
+        if (!IsConnected || entry.IsDirectory || entry.Size is not { } size || size > PrefetchSizeLimit || entry.Modified is null
             || CachedPreviewPath(entry) is not null || _previewDownloads.ContainsKey(entry.Path))
             return;
         _ = PreviewPathAsync(entry);
@@ -187,10 +198,38 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         get
         {
             if (_editWatcher is not null) return _editWatcher;
-            _editWatcher = new EditWatcher(file => AppServices.OnUi(() => Transfers.UploadEdited(file.LocalPath, file.RemotePath)));
+            _editWatcher = new EditWatcher(file => AppServices.OnUi(() => UploadEdited(file)));
             _editWatcher.Changed += (_, _) => AppServices.OnUi(() => EditedFiles = _editWatcher.Files);
             return _editWatcher;
         }
+    }
+
+    /// <summary>エディタからのアップロードの失敗（転送が終わった後の再読み込みでエラー表示が消えるので、その後にも出す）</summary>
+    private string? _editUploadFailure;
+
+    /// <summary>
+    /// エディタで保存されたファイルをアップロードする。失敗したら、保存できたと思い込まないよう
+    /// 通知（通知の設定に関係なく）とサーバー側のエラー表示の両方で知らせる（中止したときは知らせない）
+    /// </summary>
+    private void UploadEdited(EditedFile file)
+    {
+        var item = Transfers.UploadEdited(file.LocalPath, file.RemotePath);
+        var name = RemotePath.Name(file.RemotePath);
+        void ReportIfFailed()
+        {
+            if (item.State != TransferState.Failed) return;
+            var reason = item.ErrorMessage ?? "原因が分かりませんでした。";
+            _editUploadFailure = $"「{name}」をアップロードできませんでした: {reason}";
+            Remote.ErrorMessage = _editUploadFailure;
+            Notifier.Show($"「{name}」をアップロードできませんでした", $"{Server.Name}：{reason}");
+        }
+        // 再読み込みより先に覚えておくため、終わるのを待たずに状態の変化で受け取る（やり直して失敗したときも知らせる）
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TransferItem.State)) ReportIfFailed();
+        };
+        // 接続済みでファイルが消えていた場合などは、追加した時点で失敗していることがある
+        ReportIfFailed();
     }
 
     /// <summary>一時フォルダにダウンロードしてエディタで開き、保存されるたびにアップロードする</summary>
@@ -199,7 +238,7 @@ public sealed partial class SessionViewModel : ObservableObject, IAsyncDisposabl
         if (entry.IsDirectory || !IsConnected) return;
         var key = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
             System.Text.Encoding.UTF8.GetBytes($"{Server.Id}|{entry.Path}")))[..16];
-        var path = System.IO.Path.Combine(CacheRoot("Edit"), key, TransferPlanner.LocalName(entry.Name));
+        var path = System.IO.Path.Combine(TempFiles.Edit, key, TransferPlanner.LocalName(entry.Name));
         OpeningForEdit = entry.Name;
         try
         {

@@ -173,7 +173,8 @@ public static class TransferPlanner
             : t).ToList();
 
     /// <summary>
-    /// サーバーのファイル名を Windows で使える名前にする（\ / : * ? " &lt; &gt; | は全角に置き換え、末尾の点と空白は取る）
+    /// サーバーのファイル名を Windows で使える名前にする（\ / : * ? " &lt; &gt; | は全角に置き換え、末尾の点と空白は取る。
+    /// CON・NUL・COM1 などの予約名（nul.txt のように拡張子が付いたものも）は先頭に _ を付ける）
     /// </summary>
     public static string LocalName(string name)
     {
@@ -185,7 +186,23 @@ public static class TransferPlanner
             _ => c,
         }).ToArray();
         var result = new string(chars).TrimEnd('.', ' ');
-        return result.Length == 0 ? "_" : result;
+        if (result.Length == 0) return "_";
+        return IsReservedName(result) ? "_" + result : result;
+    }
+
+    /// <summary>Windows ではデバイス名として扱われ、ファイルを作れない名前</summary>
+    private static readonly HashSet<string> ReservedNames = new(
+        ["CON", "PRN", "AUX", "NUL",
+         .. Enumerable.Range(1, 9).Select(n => $"COM{n}"), "COM¹", "COM²", "COM³",
+         .. Enumerable.Range(1, 9).Select(n => $"LPT{n}"), "LPT¹", "LPT²", "LPT³"],
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>拡張子の前（最初の点の前）の部分で判定する（Windows は NUL.txt も NUL.tar.gz も NUL とみなす）</summary>
+    private static bool IsReservedName(string name)
+    {
+        var dot = name.IndexOf('.');
+        var stem = (dot < 0 ? name : name[..dot]).TrimEnd(' ');
+        return ReservedNames.Contains(stem);
     }
 
     // MARK: 上書き確認

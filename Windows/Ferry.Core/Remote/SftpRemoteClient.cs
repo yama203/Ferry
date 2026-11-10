@@ -75,12 +75,24 @@ public sealed class SftpRemoteClient : IRemoteClient
         RunAsync(async (client, token) =>
         {
             await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
-            await using var input = File.OpenRead(localPath);
-            var total = input.Length;
-            var reporter = progress is null
-                ? null
-                : new Progress<UploadFileProgressReport>(p => progress((long)p.TotalBytesUploaded, total));
-            await client.UploadFileAsync(input, remotePath, reporter, token);
+            var modified = File.GetLastWriteTimeUtc(localPath);
+            await using (var input = File.OpenRead(localPath))
+            {
+                var total = input.Length;
+                var reporter = progress is null
+                    ? null
+                    : new Progress<UploadFileProgressReport>(p => progress((long)p.TotalBytesUploaded, total));
+                await client.UploadFileAsync(input, remotePath, reporter, token);
+            }
+            // 更新日時をローカルのファイルに合わせる（同期や「新しい場合のみ上書き」で、アップロードしたものが新しく見えないように）
+            try
+            {
+                client.SetLastWriteTimeUtc(remotePath, modified);
+            }
+            catch (Exception)
+            {
+                // 属性を変えられないサーバーもある。アップロードは済んでいるので成功として扱う
+            }
             return true;
         }, cancellation);
 

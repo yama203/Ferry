@@ -102,15 +102,37 @@ public sealed class FtpRemoteClient : IRemoteClient
                             CancellationToken cancellation = default) =>
         RunAsync(async (client, token) =>
         {
-            var total = new FileInfo(localPath).Length;
+            var file = new FileInfo(localPath);
+            var total = file.Length;
+            var modified = file.LastWriteTimeUtc;
             await EnsureDirectoryAsync(client, RemotePath.Parent(remotePath), token);
             var reporter = progress is null ? null : new Progress(p => progress(p.TransferredBytes, total));
             var status = await client.UploadFile(localPath, remotePath, FtpRemoteExists.Overwrite, false, FtpVerify.None,
                                                  reporter, token);
             if (status == FtpStatus.Failed)
                 throw FerryException.Other($"「{Path.GetFileName(localPath)}」をアップロードできませんでした。");
+            await SetModifiedTimeAsync(client, remotePath, modified, token);
             return true;
         }, cancellation);
+
+    /// <summary>
+    /// アップロードしたファイルの更新日時をローカルのファイルに合わせる（MFMT に対応しているサーバーだけ）。
+    /// 合わせないとサーバー側が「アップロードした時刻」になり、同期や「新しい場合のみ上書き」で新しく見えてしまう
+    /// </summary>
+    private static async Task SetModifiedTimeAsync(AsyncFtpClient client, string remotePath, DateTime modifiedUtc,
+                                                   CancellationToken token)
+    {
+        if (!client.HasFeature(FtpCapability.MFMT)) return;
+        try
+        {
+            // TimeConversion を UTC にしているので、UTC のまま渡す（変換されずにそのまま送られる）
+            await client.SetModifiedTime(remotePath, modifiedUtc, token);
+        }
+        catch (Exception)
+        {
+            // アップロードは済んでいるので成功として扱う（接続が切れていたら次の操作でつなぎ直す）
+        }
+    }
 
     public Task MakeDirectoryAsync(string path, CancellationToken cancellation = default) =>
         ExecuteAsync($"MKD {path}", cancellation);

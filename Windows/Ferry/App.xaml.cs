@@ -8,6 +8,9 @@ public partial class App : Application
 {
     public static MainWindow? MainWindow { get; private set; }
 
+    /// <summary>Ferry が動いている印（閉じるまで持っておく。プロセスが終われば OS が消す）</summary>
+    private static Mutex? _running;
+
     public App()
     {
         InitializeComponent();
@@ -23,6 +26,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        CleanUpTempFiles();
         // Shift_JIS のテキストのプレビュー用
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         // WebView2（プレビュー）のデータは exe の隣ではなくユーザーのフォルダに置く
@@ -37,5 +41,30 @@ public partial class App : Application
             Notifier.Unregister();
         };
         MainWindow.Activate();
+    }
+
+    /// <summary>
+    /// 前回までにプレビュー・編集・ドラッグ用に落としたファイルを消す（起動を遅くしないよう UI スレッドの外で）。
+    /// Ferry は複数起動できるので、他の Ferry が動いているとき（編集の監視中かもしれない）は消さない
+    /// </summary>
+    private static void CleanUpTempFiles()
+    {
+        bool isFirst;
+        try
+        {
+            _running = new Mutex(false, @"Local\Ferry.Running", out isFirst);
+        }
+        catch (Exception e)
+        {
+            AppServices.Log(e, "起動の確認");
+            return;
+        }
+        if (!isFirst) return;
+        var startedAt = DateTime.UtcNow;
+        _ = Task.Run(() =>
+        {
+            try { Core.TempFiles.CleanUp(startedAt); }
+            catch (Exception e) { AppServices.Log(e, "一時ファイルの削除"); }
+        });
     }
 }

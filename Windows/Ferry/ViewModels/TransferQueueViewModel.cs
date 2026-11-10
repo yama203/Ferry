@@ -190,13 +190,16 @@ public sealed partial class TransferQueueViewModel : ObservableObject
     public IReadOnlyList<TransferItem> EnqueuePlanned(IReadOnlyList<PlannedTransfer> batch) =>
         batch.Count == 0 ? [] : Start(batch, batch[0].Direction, notifies: false);
 
-    /// <summary>エディタで保存されたファイルをそのままアップロードする（確認・通知なし）</summary>
+    /// <summary>エディタで保存されたファイルをそのままアップロードする（確認なし。失敗したときの知らせは呼び出し側で出す）</summary>
     public TransferItem UploadEdited(string localPath, string remotePath)
     {
+        // 保存の直後に消された・置き換え中などで大きさを読めなくても、ここでは落とさない（アップロードの失敗として出る）
+        long size = 0;
+        try { size = new FileInfo(localPath).Length; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         var plan = new PlannedTransfer
         {
-            Direction = TransferDirection.Upload, LocalPath = localPath, RemotePath = remotePath,
-            Size = new FileInfo(localPath).Length,
+            Direction = TransferDirection.Upload, LocalPath = localPath, RemotePath = remotePath, Size = size,
         };
         return Start([plan], TransferDirection.Upload, notifies: false)[0];
     }

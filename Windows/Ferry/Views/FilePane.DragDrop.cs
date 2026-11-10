@@ -92,7 +92,7 @@ public sealed partial class FilePane
     /// </summary>
     private static async Task<IReadOnlyList<IStorageItem>> RemoteStorageItemsAsync(SessionViewModel session, IReadOnlyList<FileEntry> entries)
     {
-        var temp = Path.Combine(Path.GetTempPath(), "Ferry", "drag", Guid.NewGuid().ToString("N"));
+        var temp = Path.Combine(Core.TempFiles.Drag, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
         var items = new List<IStorageItem>();
         foreach (var entry in entries)

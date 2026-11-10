@@ -135,4 +135,24 @@ public class TransferPlannerTests
     {
         Assert.Equal(expected, TransferPlanner.LocalName(name));
     }
+
+    [Theory]
+    [InlineData("CON", "_CON")]
+    [InlineData("nul", "_nul")]
+    [InlineData("nul.txt", "_nul.txt")]
+    [InlineData("Aux.tar.gz", "_Aux.tar.gz")]
+    [InlineData("com1.log", "_com1.log")]
+    [InlineData("LPT9", "_LPT9")]
+    [InlineData("prn.", "_prn")]
+    [InlineData("nul .txt", "_nul .txt")]
+    // 予約名ではないもの
+    [InlineData("COM0", "COM0")]
+    [InlineData("COM10", "COM10")]
+    [InlineData("console.txt", "console.txt")]
+    [InlineData("my-nul.txt", "my-nul.txt")]
+    [InlineData(".nul", ".nul")]
+    public void Windowsの予約名には先頭に下線を付ける(string name, string expected)
+    {
+        Assert.Equal(expected, TransferPlanner.LocalName(name));
+    }
 }
