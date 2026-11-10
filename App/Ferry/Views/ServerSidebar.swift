@@ -152,18 +152,20 @@ struct ServerSidebar: View {
 
     // MARK: - 検索
 
+    /// 空・空白だけなら検索しない（ファイル一覧の絞り込みと同じ NameFilter の決まり）
     private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+        NameFilter(searchText).isActive
     }
 
-    /// 空白区切りの語をすべて含む接続先（名前・ホスト・ユーザー名・フォルダ名が対象）
+    /// 空白区切りの語をすべて含む接続先（名前・ホスト・ユーザー名・フォルダ名が対象）。
+    /// 比べ方はファイル一覧の絞り込みと同じ NameFilter（大文字小文字・アクセント・全角半角を区別しない）
     private var searchResults: [ServerConfig] {
-        let words = searchText.split(whereSeparator: \.isWhitespace).map(String.init)
+        let filter = NameFilter(searchText)
         let folderNames = Dictionary(uniqueKeysWithValues: store.folders.map { ($0.id, $0.name) })
         return store.servers.filter { server in
             let haystack = [server.name, server.host, server.username,
                             server.folderID.flatMap { folderNames[$0] } ?? ""].joined(separator: " ")
-            return words.allSatisfy { haystack.localizedStandardContains($0) }
+            return filter.matches(haystack)
         }
     }
 

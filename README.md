@@ -37,7 +37,7 @@ xcodegen generate        # Ferry.xcodeproj を作る
 ./release.sh             # バージョンを上げて GitHub のリリースとして公開
 ```
 
-- `FerryKit/` … 通信部分（libcurl のラッパー）と動作確認用の `ferry-cli`。`swift test` で一覧解析のテスト
+- `FerryKit/` … 通信部分（libcurl のラッパー）と動作確認用の `ferry-cli`。`swift test` で一覧解析・名前の絞り込み・FTPS の判定・ホスト鍵の記録などのテスト
 - `App/` … アプリ本体（SwiftUI + AppKit）
 - `App/Tools/make-icon.swift` … アイコンを描く
 - `App/Tools/bundle-libs.sh` … libcurl と依存ライブラリ、ルート証明書をアプリに同梱する

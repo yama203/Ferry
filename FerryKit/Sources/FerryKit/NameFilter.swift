@@ -1,7 +1,7 @@
 import Foundation
 
-/// ファイル一覧の名前での絞り込み。空白区切りの語をすべて含む名前だけを残す。
-/// サイドバーの接続先の検索と同じく大文字小文字・アクセントを区別せず、加えて全角半角も区別しない
+/// ファイル一覧の名前での絞り込み（サイドバーの接続先の検索も同じ比べ方）。空白区切りの語をすべて含む名前だけを残す。
+/// 大文字小文字・アクセントに加えて全角半角も区別しない
 /// （localizedStandardContains だけでは「ＩＭＧ」と「img」、「ｶﾅ」と「カナ」が別物になる）。
 public struct NameFilter: Sendable, Equatable {
     public let terms: [String]
