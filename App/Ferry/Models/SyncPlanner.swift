@@ -7,6 +7,8 @@ enum SyncPlanner {
         var isDirectory: Bool
         var size: Int64?
         var modified: Date?
+        /// 更新日時の粗さ（秒）。リモートは一覧の形式による、ローカルは 0
+        var modifiedPrecision: TimeInterval = 0
     }
 
     struct Change: Identifiable {
@@ -14,6 +16,8 @@ enum SyncPlanner {
         let relativePath: String
         let reason: Reason
         let size: Int64
+        /// 転送元の更新日時（転送後に転送先の更新日時をこれに揃える）
+        let modified: Date?
         var id: String { relativePath }
     }
 
@@ -62,7 +66,8 @@ enum SyncPlanner {
             await onFolder(directory)
             for item in try await client.list(directory) where !rules.excludes(item.name) {
                 let relative = relativeDirectory.isEmpty ? item.name : relativeDirectory + "/" + item.name
-                result[relative] = Entry(isDirectory: item.isDirectory, size: item.size, modified: item.modified)
+                result[relative] = Entry(isDirectory: item.isDirectory, size: item.size, modified: item.modified,
+                                         modifiedPrecision: item.modifiedPrecision)
                 if item.isDirectory {
                     pending.append(relative)
                 }
@@ -78,18 +83,21 @@ enum SyncPlanner {
         var plan = Plan()
         for (path, entry) in source where !entry.isDirectory {
             guard let existing = destination[path], !existing.isDirectory else {
-                plan.changes.append(Change(relativePath: path, reason: .new, size: entry.size ?? 0))
+                plan.changes.append(Change(relativePath: path, reason: .new, size: entry.size ?? 0,
+                                           modified: entry.modified))
                 continue
             }
             let sizeChanged = entry.size != nil && existing.size != nil && entry.size != existing.size
             let isNewer: Bool
             if let sourceDate = entry.modified, let destinationDate = existing.modified {
-                isNewer = sourceDate.timeIntervalSince(destinationDate) > 2
+                isNewer = ModifiedDate.isSourceNewer(sourceDate, than: destinationDate,
+                                                     destinationPrecision: existing.modifiedPrecision)
             } else {
                 isNewer = false
             }
             if sizeChanged || isNewer {
-                plan.changes.append(Change(relativePath: path, reason: .changed, size: entry.size ?? 0))
+                plan.changes.append(Change(relativePath: path, reason: .changed, size: entry.size ?? 0,
+                                           modified: entry.modified))
             }
         }
 

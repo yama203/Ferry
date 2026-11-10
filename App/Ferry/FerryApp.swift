@@ -23,6 +23,7 @@ struct FerryApp: App {
         Passwords.isShared = { [weak store] id in store?.isShared(id) ?? false }
         _vault = State(initialValue: vault)
         Notifier.setUp()
+        ServerSession.removeLeftoverDownloads()
         // 同梱したルート証明書を使う（Homebrew の無い Mac でも FTPS の証明書を検証できるように）
         RemoteClient.caBundlePath = Bundle.main.path(forResource: "cacert", ofType: "pem")
     }

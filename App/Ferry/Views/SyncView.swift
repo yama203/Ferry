@@ -363,7 +363,7 @@ struct SyncView: View {
             TransferItem(direction: direction,
                          localURL: localRoot.appendingPathComponent(change.relativePath),
                          remotePath: RemotePath.join(remoteRoot, change.relativePath),
-                         total: change.size)
+                         total: change.size, sourceModified: change.modified)
         }
         session.transfers.enqueuePlanned(items)
         if items.isEmpty {

@@ -38,11 +38,8 @@ struct FolderDownload {
                     var outcomes: [Outcome] = []
                     while let job = await queue.next() {
                         do {
-                            try await client.download(job.item.path, to: job.target, expectedSize: job.item.size)
-                            if let modified = job.item.modified {
-                                try? FileManager.default.setAttributes([.modificationDate: modified],
-                                                                       ofItemAtPath: job.target.path)
-                            }
+                            try await client.download(job.item.path, to: job.target, expectedSize: job.item.size,
+                                                      modified: job.item.modified)
                             print("⬇️  \(job.item.path)")
                             outcomes.append(.downloaded)
                         } catch {

@@ -23,6 +23,8 @@ final class TransferItem: Identifiable {
     var sourceModified: Date?
     var destinationExists = false
     var destinationModified: Date?
+    /// 転送先の更新日時の粗さ（秒）。サーバーの一覧は分単位・日単位のことがある。ローカルは 0
+    var destinationModifiedPrecision: TimeInterval = 0
 
     @ObservationIgnored var task: Task<Void, Error>?
     @ObservationIgnored private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -34,7 +36,7 @@ final class TransferItem: Identifiable {
     /// 転送元の方が新しいか（日時が分からない場合は新しいとみなす）
     var isSourceNewer: Bool {
         guard let source = sourceModified, let destination = destinationModified else { return true }
-        return source.timeIntervalSince(destination) > 1
+        return ModifiedDate.isSourceNewer(source, than: destination, destinationPrecision: destinationModifiedPrecision)
     }
 
     init(direction: Direction, localURL: URL, remotePath: String, total: Int64, sourceModified: Date? = nil) {
@@ -99,35 +101,56 @@ final class TransferQueue {
     }
 
     var activeCount: Int { items.filter(\.isActive).count }
+    /// 転送を処理している最中か（終わると onIdle を呼ぶ）
+    var isRunning: Bool { runner != nil }
 
     // MARK: - アップロード
 
     func enqueueUploads(_ urls: [URL], toRemoteDirectory directory: String) async {
-        let batch = collectUploads(urls, toRemoteDirectory: directory)
-        guard !batch.isEmpty else { return }
         isPreparing = true
+        // ファイルの多いフォルダをたどると時間がかかるので、メインスレッドの外でたどる
+        let rules = excludeRules()
+        let planned = await Task.detached { Self.collectUploads(urls, toRemoteDirectory: directory, rules: rules) }.value
+        let batch = planned.map { upload in
+            TransferItem(direction: .upload, localURL: upload.localURL, remotePath: upload.remotePath,
+                         total: upload.size, sourceModified: upload.modified)
+        }
+        guard !batch.isEmpty else {
+            isPreparing = false
+            return
+        }
         await markRemoteConflicts(batch)
         isPreparing = false
         submit(batch, direction: .upload)
     }
 
     /// エディタで保存されたファイルをそのままアップロードする（確認なし）
-    func uploadEdited(_ url: URL, to remotePath: String) {
+    @discardableResult
+    func uploadEdited(_ url: URL, to remotePath: String) -> TransferItem {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        submit([TransferItem(direction: .upload, localURL: url, remotePath: remotePath, total: Int64(size))],
-               direction: .upload, confirmOverwrite: false, notifies: false)
+        let item = TransferItem(direction: .upload, localURL: url, remotePath: remotePath, total: Int64(size))
+        submit([item], direction: .upload, confirmOverwrite: false, notifies: false)
+        return item
+    }
+
+    /// アップロードする 1 ファイル（メインスレッドの外で集めるので値型にする）
+    private struct PlannedUpload: Sendable {
+        let localURL: URL
+        let remotePath: String
+        let size: Int64
+        let modified: Date?
     }
 
     /// フォルダは中のファイルに展開する。除外ルールはフォルダの中身にだけ適用する。
-    private func collectUploads(_ urls: [URL], toRemoteDirectory directory: String) -> [TransferItem] {
-        let rules = excludeRules()
+    private nonisolated static func collectUploads(_ urls: [URL], toRemoteDirectory directory: String,
+                                                   rules: ExcludeRules) -> [PlannedUpload] {
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
-        var batch: [TransferItem] = []
+        var batch: [PlannedUpload] = []
 
-        func item(for file: URL, remotePath: String) -> TransferItem? {
+        func item(for file: URL, remotePath: String) -> PlannedUpload? {
             guard let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { return nil }
-            return TransferItem(direction: .upload, localURL: file, remotePath: remotePath,
-                                total: Int64(values.fileSize ?? 0), sourceModified: values.contentModificationDate)
+            return PlannedUpload(localURL: file, remotePath: remotePath, size: Int64(values.fileSize ?? 0),
+                                 modified: values.contentModificationDate)
         }
 
         for url in urls {
@@ -160,6 +183,7 @@ final class TransferQueue {
             if let remote = existing[item.remotePath], !remote.isDirectory {
                 item.destinationExists = true
                 item.destinationModified = remote.modified
+                item.destinationModifiedPrecision = remote.modifiedPrecision
             }
         }
     }
@@ -350,7 +374,7 @@ final class TransferQueue {
                 try FileManager.default.createDirectory(at: item.localURL.deletingLastPathComponent(),
                                                         withIntermediateDirectories: true)
                 try await client.download(item.remotePath, to: item.localURL, expectedSize: item.total,
-                                          progress: progress)
+                                          modified: item.sourceModified, progress: progress)
             }
         }
         item.task = task

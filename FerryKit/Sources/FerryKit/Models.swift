@@ -122,6 +122,9 @@ public struct RemoteItem: Identifiable, Hashable, Sendable {
     public var kind: Kind
     public var size: Int64?
     public var modified: Date?
+    /// 更新日時の粗さ（秒）。一覧の日時は切り捨てた値なので、本当の日時は modified から modified + これ未満の間にある。
+    /// MLSD は 1、ls -l 形式の時刻付き（`Oct 14 10:00`）は 60、日付だけ（`Jan  2  2020`）は 86400
+    public var modifiedPrecision: TimeInterval
     /// "rwxr-xr-x" 形式
     public var permissions: String?
     public var symlinkTarget: String?
@@ -130,14 +133,29 @@ public struct RemoteItem: Identifiable, Hashable, Sendable {
     public var isDirectory: Bool { kind == .directory }
 
     public init(name: String, path: String, kind: Kind, size: Int64? = nil, modified: Date? = nil,
-                permissions: String? = nil, symlinkTarget: String? = nil) {
+                modifiedPrecision: TimeInterval = 1, permissions: String? = nil, symlinkTarget: String? = nil) {
         self.name = name
         self.path = path
         self.kind = kind
         self.size = size
         self.modified = modified
+        self.modifiedPrecision = modifiedPrecision
         self.permissions = permissions
         self.symlinkTarget = symlinkTarget
+    }
+}
+
+/// 転送元と転送先の更新日時の比較（同期・「新しい場合のみ上書き」で使う）
+public enum ModifiedDate {
+    /// これ以下のずれは同じとみなす
+    public static let tolerance: TimeInterval = 2
+
+    /// 転送元の方が新しいか。destinationPrecision は転送先の日時の粗さ（サーバーの一覧なら RemoteItem.modifiedPrecision、ローカルなら 0）。
+    /// 転送先がサーバーのとき、一覧の値は本当の日時を切り捨てたものなので、粗さの分だけ遅い方に寄せて比べる
+    /// （更新日時をローカルに揃えてアップロードしたファイルが、毎回「ローカルの方が新しい」と見えないように）。
+    /// 転送元がサーバーのときは、切り捨てた値は本当の日時以下なので、そのまま比べても誤って新しいとはみなさない。
+    public static func isSourceNewer(_ source: Date, than destination: Date, destinationPrecision: TimeInterval) -> Bool {
+        source.timeIntervalSince(destination) > destinationPrecision + tolerance
     }
 }
 

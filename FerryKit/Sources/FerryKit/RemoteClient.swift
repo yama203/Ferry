@@ -82,7 +82,9 @@ public final class RemoteClient: @unchecked Sendable {
         }
     }
 
-    public func download(_ remotePath: String, to localURL: URL, expectedSize: Int64? = nil,
+    /// modified … サーバー側の更新日時。分かっていればダウンロードしたファイルの更新日時をそれに揃える
+    /// （ダウンロードした時刻のままだと、同期や「新しい場合のみ上書き」でローカルの方が新しく見える）
+    public func download(_ remotePath: String, to localURL: URL, expectedSize: Int64? = nil, modified: Date? = nil,
                          progress: Progress? = nil) async throws {
         let partURL = localURL.appendingPathExtension("ferrypart")
         let cancel = CancelFlag()
@@ -107,21 +109,24 @@ public final class RemoteClient: @unchecked Sendable {
                 } else {
                     try FileManager.default.moveItem(at: partURL, to: localURL)
                 }
+                if let modified {
+                    try? FileManager.default.setAttributes([.modificationDate: modified], ofItemAtPath: localURL.path)
+                }
             }
         } onCancel: {
             cancel.cancel()
         }
     }
 
-    /// アップロード先のフォルダが無ければ作成する
+    /// アップロード先のフォルダが無ければ作成する。終わったらサーバー側の更新日時をローカルのファイルに揃える。
     public func upload(_ localURL: URL, to remotePath: String, progress: Progress? = nil) async throws {
         let cancel = CancelFlag()
         try await withTaskCancellationHandler {
             try await run { handle in
                 let input = try FileHandle(forReadingFrom: localURL)
                 defer { try? input.close() }
-                let size = (try FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? NSNumber)?
-                    .int64Value ?? 0
+                let attributes = try FileManager.default.attributesOfItem(atPath: localURL.path)
+                let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
 
                 let context = TransferContext(cancel: cancel, progress: progress, expectedTotal: size)
                 context.input = input
@@ -135,7 +140,10 @@ public final class RemoteClient: @unchecked Sendable {
                 handle.set(CURLOPT_NEW_FILE_PERMS, 0o644)
                 handle.set(CURLOPT_NEW_DIRECTORY_PERMS, 0o755)
                 let quote = self.attach(context, to: handle, isUpload: true)
-                try withExtendedLifetime((context, quote)) { try handle.perform() }
+                let postQuote = (attributes[.modificationDate] as? Date).map {
+                    self.setModifiedCommand(remotePath, to: $0, handle: handle)
+                }
+                try withExtendedLifetime((context, quote, postQuote)) { try handle.perform() }
             }
         } onCancel: {
             cancel.cancel()
@@ -280,6 +288,34 @@ public final class RemoteClient: @unchecked Sendable {
         handle.set(CURLOPT_QUOTE, pointer: UnsafeMutableRawPointer(list.raw))
         return list
     }
+
+    /// アップロード後に更新日時を設定するコマンド。先頭の * で失敗を無視する（非対応のサーバーでは何も起きない）。
+    /// アップロードは階層ごとに CWD した後なので、パスは絶対パスで渡す。戻り値は perform が終わるまで保持すること。
+    private func setModifiedCommand(_ remotePath: String, to date: Date, handle: CurlHandle) -> CurlStringList {
+        let command = server.serverProtocol.isFTPFamily
+            ? "*MFMT \(Self.mfmtFormatter.string(from: date)) \(remotePath)"
+            // libcurl の SFTP の mtime。日時は curl_getdate が読める形で、空白を含むので引用符で囲む
+            : "*mtime \"\(Self.sftpDateFormatter.string(from: date))\" \(sftpQuoted(remotePath))"
+        let list = CurlStringList([command])
+        handle.set(CURLOPT_POSTQUOTE, pointer: UnsafeMutableRawPointer(list.raw))
+        return list
+    }
+
+    private static let mfmtFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyyMMddHHmmss"
+        return formatter
+    }()
+
+    private static let sftpDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter
+    }()
 
     private func execute(_ commands: [String]) async throws {
         try await run { handle in

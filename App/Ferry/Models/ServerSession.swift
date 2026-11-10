@@ -32,6 +32,11 @@ final class ServerSession {
     /// Quick Look のプレビュー用（一覧表示や転送を待たせないよう接続を分ける）
     @ObservationIgnored private let previewClient: RemoteClient
     @ObservationIgnored private var hasPassword: Bool
+    /// 編集したファイルの自動アップロードの失敗。待ち行列が空になったときの再読み込みが成功すると
+    /// エラー表示が消えるので、覚えておいて再読み込みの後に入れ直す
+    @ObservationIgnored private var editUploadFailure: String?
+    /// 待ち行列が空になったときの再読み込みのうち、終わっていないものの数
+    @ObservationIgnored private var idleRefreshCount = 0
 
     init(server: ServerConfig, password: String?, excludeRules: @escaping () -> ExcludeRules) {
         self.server = server
@@ -47,13 +52,19 @@ final class ServerSession {
         hasPassword = password != nil || server.privateKeyPath != nil || server.username == "anonymous"
         transfers.onIdle = { [weak self] in
             guard let self else { return }
+            idleRefreshCount += 1
             Task {
                 await self.local.refresh()
                 await self.remote.refresh()
+                self.idleRefreshCount -= 1
+                if self.idleRefreshCount == 0, let failure = self.editUploadFailure {
+                    self.remote.errorMessage = failure
+                    self.editUploadFailure = nil
+                }
             }
         }
         editWatcher = EditWatcher { [weak self] file in
-            self?.transfers.uploadEdited(file.localURL, to: file.remotePath)
+            self?.uploadEdited(file)
         }
     }
 
@@ -164,6 +175,7 @@ final class ServerSession {
     /// ダウンロードしてエディタで開き、保存されたら自動でアップロードする
     func edit(_ entry: FileEntry) async {
         guard !entry.isDirectory else { return }
+        await Self.removingLeftovers?.value
         let directory = Self.editCacheDirectory
             .appendingPathComponent(server.id.uuidString)
             .appendingPathComponent(String(RemotePath.parent(of: entry.path).dropFirst()))
@@ -176,6 +188,30 @@ final class ServerSession {
             EditorApp.open(file)
         } catch {
             remote.errorMessage = "編集用のダウンロードに失敗しました: \(error.localizedDescription)"
+        }
+    }
+
+    /// 保存されたファイルを自動でアップロードする。転送一覧に「失敗」と出るだけでは保存できたと思い込むので、
+    /// 失敗したら通知の設定に関係なく通知し、リモート側にも出す（中止したときは出さない）
+    private func uploadEdited(_ file: EditWatcher.EditedFile) {
+        let item = transfers.uploadEdited(file.localURL, to: file.remotePath)
+        let serverName = server.name
+        Task { [weak self] in
+            await item.waitUntilDone()
+            guard case .failed(let reason) = item.state else { return }
+            let message = "『\(item.name)』をアップロードできませんでした: \(reason)"
+            self?.showEditUploadFailure(message)
+            await Notifier.requestAuthorization()
+            Notifier.post(title: "『\(item.name)』をアップロードできませんでした",
+                          body: serverName.isEmpty ? reason : "\(serverName)：\(reason)")
+        }
+    }
+
+    /// 再読み込みがこれから（転送の処理中）か途中なら、終わった後にも入れ直す。どちらでもなければ消されることはない
+    private func showEditUploadFailure(_ message: String) {
+        remote.errorMessage = message
+        if transfers.isRunning || idleRefreshCount > 0 {
+            editUploadFailure = message
         }
     }
 
@@ -196,12 +232,16 @@ final class ServerSession {
             .appendingPathComponent(String(entry.path.dropFirst()))
     }
 
-    /// ダウンロード済みで、すぐに表示できるプレビュー（同じサイズのファイルがあれば使い回す）
+    /// ダウンロード済みで、すぐに表示できるプレビュー。サイズだけではサイズの変わらない編集の後に古い中身が出るので、
+    /// 更新日時（ダウンロード時にサーバーのものに揃えている）も同じときだけ使い回す。サーバーの日時が分からなければ使い回さない
     func cachedPreviewURL(for entry: FileEntry) -> URL? {
-        guard !entry.isDirectory else { return nil }
+        guard !entry.isDirectory, Self.removingLeftovers == nil, let modified = entry.modified else { return nil }
         let url = previewCacheURL(for: entry)
-        let cachedSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
-        return cachedSize != nil && cachedSize == entry.size ? url : nil
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey]),
+              let cachedSize = values.fileSize, Int64(cachedSize) == entry.size,
+              let cachedModified = values.contentModificationDate,
+              abs(cachedModified.timeIntervalSince(modified)) < 1 else { return nil }
+        return url
     }
 
     /// Quick Look 用にダウンロードしたファイル。転送一覧には出さず、プレビュー専用の接続で取得する。
@@ -217,13 +257,14 @@ final class ServerSession {
         if let running = previewDownloads[entry.path] {
             return await running.value
         }
+        await Self.removingLeftovers?.value
         let url = previewCacheURL(for: entry)
         let client = previewClient
         let task = Task<URL?, Never> { @MainActor in
             defer { previewDownloads[entry.path] = nil }
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try await client.download(entry.path, to: url, expectedSize: entry.size)
+                try await client.download(entry.path, to: url, expectedSize: entry.size, modified: entry.modified)
                 return url
             } catch {
                 remote.errorMessage = "プレビュー用のダウンロードに失敗しました: \(error.localizedDescription)"
@@ -247,6 +288,28 @@ final class ServerSession {
     private static let editCacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("com.yama.Ferry/Edit")
 
+    /// Finder へのドラッグでいったんダウンロードする場所
+    private static let dragDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("Ferry-Drag")
+
+    /// 前回までに残ったファイルを消している最中か（消し終わるまで新しくダウンロードしない）
+    private static var removingLeftovers: Task<Void, Never>?
+
+    /// プレビュー・編集・ドラッグ用に落としたファイル（wp-config.php などパスワードを含むものもある）を残し続けないよう、
+    /// 起動時（まだ何も編集・監視していない時点）に丸ごと消す。起動を遅くしないようメインスレッドの外で消す
+    static func removeLeftoverDownloads() {
+        let directories = [previewCacheDirectory, editCacheDirectory, dragDirectory]
+        let task = Task.detached(priority: .utility) {
+            for directory in directories {
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+        removingLeftovers = task
+        Task {
+            await task.value
+            removingLeftovers = nil
+        }
+    }
+
     // MARK: - ドラッグ
 
     /// リモートの項目のドラッグ。アプリ内（左のペイン）には項目の情報を、Finder にはダウンロードしたファイルを渡す。
@@ -262,7 +325,8 @@ final class ServerSession {
 
     /// Finder へのドロップ先にダウンロードする
     fileprivate func downloadForPromise(_ entry: FileEntry, to destination: URL) async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Ferry-Drag/\(UUID().uuidString)")
+        await Self.removingLeftovers?.value
+        let directory = Self.dragDirectory.appendingPathComponent(UUID().uuidString)
         try await transfers.downloadAndWait([entry], into: directory)
         try FileManager.default.moveItem(at: directory.appendingPathComponent(entry.name), to: destination)
         try? FileManager.default.removeItem(at: directory)

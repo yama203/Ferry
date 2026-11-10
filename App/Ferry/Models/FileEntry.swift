@@ -10,6 +10,8 @@ struct FileEntry: Identifiable, Hashable, Codable {
     var isSymlink: Bool
     var size: Int64?
     var modified: Date?
+    /// 更新日時の粗さ（秒）。リモートは一覧の形式による（RemoteItem.modifiedPrecision）、ローカルは 0
+    var modifiedPrecision: TimeInterval = 0
     var permissions: String?
     /// Finder のタグ（ローカルのみ）
     var tags: [FinderTag] = []
@@ -28,6 +30,7 @@ struct FileEntry: Identifiable, Hashable, Codable {
         isSymlink = item.kind == .symlink
         size = item.size
         modified = item.modified
+        modifiedPrecision = item.modifiedPrecision
         permissions = item.permissions
     }
 

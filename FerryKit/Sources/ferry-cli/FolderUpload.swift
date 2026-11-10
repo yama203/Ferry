@@ -132,7 +132,7 @@ struct FolderUpload {
     private func isUnchanged(_ local: URLResourceValues, _ remote: RemoteItem?) -> Bool {
         guard let remote, remote.kind == .file, let size = local.fileSize, Int64(size) == remote.size,
               let localDate = local.contentModificationDate, let remoteDate = remote.modified else { return false }
-        // サーバーの日時はアップロードした時刻になる。LIST の日時は分単位なので 2 分の余裕を見る
-        return remoteDate >= localDate.addingTimeInterval(-120)
+        // アップロードでサーバーの日時をローカルに揃えている。一覧の日時は分単位（古いものは日単位）なので粗さを考えて比べる
+        return !ModifiedDate.isSourceNewer(localDate, than: remoteDate, destinationPrecision: remote.modifiedPrecision)
     }
 }

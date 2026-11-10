@@ -8,6 +8,12 @@ public enum ListingParser {
             ?? String(decoding: data, as: UTF8.self)
     }
 
+    /// 一覧の名前はそのままローカルのパスにつなげる（フォルダごとのダウンロードなど）ので、
+    /// 細工されたサーバーが返す `../../.zshrc` のような名前で保存先の外に書き込まれないよう捨てる
+    static func isSafeName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains { $0 == "/" || $0 == "\0" }
+    }
+
     // MARK: - MLSD
 
     /// 例: `type=file;size=1234;modify=20261014103000;UNIX.mode=0644; index.php`
@@ -18,7 +24,7 @@ public enum ListingParser {
     static func parseMLSDLine(_ line: String, directory: String) -> RemoteItem? {
         guard let space = line.firstIndex(of: " ") else { return nil }
         let name = String(line[line.index(after: space)...])
-        guard !name.isEmpty, name != ".", name != ".." else { return nil }
+        guard isSafeName(name) else { return nil }
 
         var facts: [String: String] = [:]
         for fact in line[..<space].split(separator: ";") {
@@ -41,6 +47,7 @@ public enum ListingParser {
             kind: kind,
             size: facts["size"].flatMap { Int64($0) },
             modified: facts["modify"].flatMap(parseMLSDTime),
+            modifiedPrecision: 1,
             permissions: facts["unix.mode"].flatMap(permissionString(fromOctal:))
         )
     }
@@ -96,7 +103,6 @@ public enum ListingParser {
 
         let nameStart = tokens[monthIndex + 2].end
         var name = String(line[nameStart...].drop(while: { $0 == " " }))
-        guard !name.isEmpty, name != ".", name != ".." else { return nil }
 
         let kind: RemoteItem.Kind
         var target: String?
@@ -110,8 +116,10 @@ public enum ListingParser {
             }
         default: kind = .file
         }
+        guard isSafeName(name) else { return nil }
 
         let permissions = String(tokens[0].text.dropFirst().prefix(9))
+        let timeOrYear = String(tokens[monthIndex + 2].text)
         return RemoteItem(
             name: name,
             path: RemotePath.join(directory, name),
@@ -120,9 +128,11 @@ public enum ListingParser {
             modified: parseUnixDate(
                 month: String(tokens[monthIndex].text),
                 day: String(tokens[monthIndex + 1].text),
-                timeOrYear: String(tokens[monthIndex + 2].text),
+                timeOrYear: timeOrYear,
                 now: now
             ),
+            // 時刻付きは分まで、半年より古いものなどは日付だけ
+            modifiedPrecision: timeOrYear.contains(":") ? 60 : 86_400,
             permissions: permissions.count == 9 ? permissions : nil,
             symlinkTarget: target
         )

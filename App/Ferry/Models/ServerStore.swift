@@ -112,6 +112,9 @@ final class ServerStore {
     var importError: String?
 
     @ObservationIgnored private var presenter: FilePresenter?
+    /// servers.json はあるのに読めなかった（壊れた JSON、他の版が足した知らない値、iCloud から落とせない など）。
+    /// このまま保存すると一覧が空に近い内容で上書きされて元の接続先が消えるので、保存の前に元のファイルを退避する
+    @ObservationIgnored private var hasUnreadableFile = false
 
     private struct FileContents: Codable {
         var version = 2
@@ -192,18 +195,46 @@ final class ServerStore {
         try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
         var coordinatorError: NSError?
         var loaded: FileContents?
+        var readError: Error?
         NSFileCoordinator(filePresenter: presenter).coordinate(readingItemAt: fileURL, options: [],
                                                                error: &coordinatorError) { url in
-            guard let data = try? Data(contentsOf: url) else { return }
-            loaded = try? JSONDecoder().decode(FileContents.self, from: data)
+            do {
+                loaded = try JSONDecoder().decode(FileContents.self, from: try Data(contentsOf: url))
+            } catch {
+                readError = error
+            }
         }
-        guard let loaded else { return }
+        guard let loaded else {
+            // ファイルが無いだけ（初回起動）なら今までどおり
+            if fileExistsOrIsInICloud {
+                hasUnreadableFile = true
+                let reason = (readError ?? coordinatorError).map { String(describing: $0) } ?? "不明"
+                NSLog("Ferry: %@ を読めませんでした（保存する前に退避します）: %@", fileURL.path, reason)
+            }
+            return
+        }
+        hasUnreadableFile = false
         if loaded.servers != personalServers { personalServers = loaded.servers }
         if loaded.folders != personalFolders { personalFolders = loaded.folders }
         let overrides = loaded.sharedOverrides ?? [:]
         if overrides != sharedOverrides { sharedOverrides = overrides }
         let rules = loaded.excludePatterns.map(ExcludeRules.init(patterns:)) ?? .defaults
         if rules != excludeRules { excludeRules = rules }
+    }
+
+    /// まだ iCloud から落としていないファイルは .servers.json.icloud という名前の代わりのファイルになっている
+    private var fileExistsOrIsInICloud: Bool {
+        let placeholder = fileURL.deletingLastPathComponent().appendingPathComponent(".\(fileURL.lastPathComponent).icloud")
+        return FileManager.default.fileExists(atPath: fileURL.path) || FileManager.default.fileExists(atPath: placeholder.path)
+    }
+
+    /// 読めなかったファイルを同じフォルダに退避する名前
+    private var unreadableBackupURL: URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HHmmss"
+        return fileURL.deletingLastPathComponent()
+            .appendingPathComponent("servers（読めなかったもの \(formatter.string(from: Date()))）.json")
     }
 
     func save() {
@@ -213,8 +244,25 @@ final class ServerStore {
                                                              excludePatterns: excludeRules.patterns,
                                                              sharedOverrides: sharedOverrides)) else { return }
         var coordinatorError: NSError?
+        let backupURL = hasUnreadableFile ? unreadableBackupURL : nil
         NSFileCoordinator(filePresenter: presenter).coordinate(writingItemAt: fileURL, options: .forReplacing,
                                                                error: &coordinatorError) { url in
+            if backupURL != nil, !FileManager.default.fileExists(atPath: url.path), fileExistsOrIsInICloud {
+                // iCloud から落とせていないだけで、退避できるものが手元に無い。上書きすると元の接続先が消えるかもしれない
+                NSLog("Ferry: %@ を iCloud から落とせていないので保存しません", url.path)
+                return
+            }
+            if let backupURL, FileManager.default.fileExists(atPath: url.path) {
+                do {
+                    try FileManager.default.copyItem(at: url, to: backupURL)
+                    NSLog("Ferry: 読めなかった %@ を %@ に退避しました", url.path, backupURL.lastPathComponent)
+                } catch {
+                    // 退避できないまま上書きすると元の接続先が消えるので、保存しない
+                    NSLog("Ferry: 読めなかった %@ を退避できなかったので保存しません: %@", url.path, String(describing: error))
+                    return
+                }
+            }
+            hasUnreadableFile = false
             try? data.write(to: url, options: .atomic)
         }
     }

@@ -46,6 +46,64 @@ struct ListingParserTests {
         #expect(items[3].size == 9)
     }
 
+    @Test func modifiedPrecision() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-14T12:00:00Z")!
+        let mlsd = ListingParser.parseMLSD("type=file;size=1;modify=20261001120000; a.txt", directory: "/")
+        #expect(mlsd[0].modifiedPrecision == 1)
+        let text = """
+        -rw-r--r--    1 user  group      1 Oct 14 10:00 time.txt
+        -rw-r--r--    1 user  group      1 Jan  2  2020 year.txt
+        """
+        let items = ListingParser.parseUnixListing(text, directory: "/", now: now)
+        #expect(items[0].modifiedPrecision == 60)
+        #expect(items[1].modifiedPrecision == 86_400)
+    }
+
+    @Test func sourceNewer() {
+        let listed = ISO8601DateFormatter().date(from: "2026-10-14T10:00:00Z")!
+        // アップロード: サーバーの一覧が 10:00（分まで）、ローカルが 10:00:59 → 同じファイル
+        #expect(!ModifiedDate.isSourceNewer(listed.addingTimeInterval(59), than: listed, destinationPrecision: 60))
+        #expect(!ModifiedDate.isSourceNewer(listed.addingTimeInterval(62), than: listed, destinationPrecision: 60))
+        #expect(ModifiedDate.isSourceNewer(listed.addingTimeInterval(63), than: listed, destinationPrecision: 60))
+        // 日付だけの一覧は 1 日近くまで同じとみなす
+        #expect(!ModifiedDate.isSourceNewer(listed.addingTimeInterval(86_000), than: listed, destinationPrecision: 86_400))
+        #expect(ModifiedDate.isSourceNewer(listed.addingTimeInterval(86_403), than: listed, destinationPrecision: 86_400))
+        // ダウンロード: 転送先はローカル（粗さ 0）。サーバーの切り捨てた値が 2 秒を超えて新しいときだけ
+        #expect(!ModifiedDate.isSourceNewer(listed, than: listed.addingTimeInterval(-2), destinationPrecision: 0))
+        #expect(ModifiedDate.isSourceNewer(listed, than: listed.addingTimeInterval(-3), destinationPrecision: 0))
+        #expect(!ModifiedDate.isSourceNewer(listed, than: listed.addingTimeInterval(30), destinationPrecision: 0))
+    }
+
+    /// 保存先のフォルダの外を指す名前は一覧に出さない
+    @Test func unsafeNamesInMLSD() {
+        let text = "type=file;size=1; ../../.zshrc\r\n"
+            + "type=file;size=1; a/b.txt\r\n"
+            + "type=dir; ..\r\n"
+            + "type=file;size=1; \r\n"
+            + "type=file;size=1; nul\u{0}name\r\n"
+            + "type=file;size=1; ok.txt\r\n"
+        let items = ListingParser.parseMLSD(text, directory: "/")
+        #expect(items.map(\.name) == ["ok.txt"])
+    }
+
+    @Test func unsafeNamesInUnixListing() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-14T12:00:00Z")!
+        let text = """
+        -rw-r--r--    1 user  group      1 Oct 14 10:00 ../../.zshrc
+        -rw-r--r--    1 user  group      1 Oct 14 10:00 a/b.txt
+        drwxr-xr-x    2 user  group   4096 Oct 14 10:00 ..
+        lrwxrwxrwx    1 user  group      2 Oct 14 10:00 .. -> /etc
+        lrwxrwxrwx    1 user  group      2 Oct 14 10:00 x/y -> /etc
+        -rw-r--r--    1 user  group      1 Oct 14 10:00 nul\u{0}name
+        lrwxrwxrwx    1 user  group      2 Oct 14 10:00 link -> ../shared/file
+        -rw-r--r--    1 user  group      1 Oct 14 10:00 ok.txt
+        """
+        let items = ListingParser.parseUnixListing(text, directory: "/", now: now)
+        // リンク先に / や .. を含むのはかまわない（名前だけを見る）
+        #expect(items.map(\.name) == ["link", "ok.txt"])
+        #expect(items[0].symlinkTarget == "../shared/file")
+    }
+
     @Test func paths() {
         #expect(RemotePath.join("/", "a") == "/a")
         #expect(RemotePath.join("/a", "b") == "/a/b")
