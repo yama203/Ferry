@@ -53,8 +53,17 @@ public static class FerryJson
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + ".tmp-" + Guid.NewGuid().ToString("N")[..8];
-        File.WriteAllText(temp, contents + "\n");
-        File.Move(temp, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(temp, contents + "\n");
+            File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            // 置き換えに失敗したら一時ファイルを残さない（共有フォルダに散らからないように）
+            try { File.Delete(temp); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>ID は Mac 版（Swift の uuidString）に合わせて大文字で書く</summary>

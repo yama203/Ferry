@@ -23,7 +23,10 @@ public sealed class PasswordVault : IDisposable
     {
         /// <summary>同期していない（ファイルが無い）</summary>
         Off,
-        /// <summary>他の PC で同期が設定されているが、この PC ではまだマスターパスワードを入力していない</summary>
+        /// <summary>
+        /// 他の PC で同期が設定されているが、この PC ではまだマスターパスワードを入力していない。
+        /// または、他の PC でマスターパスワードが変更されて、この PC の鍵では開けなくなった（<see cref="HasOutdatedKey"/>）
+        /// </summary>
         Locked,
         Unlocked,
     }
@@ -33,6 +36,15 @@ public sealed class PasswordVault : IDisposable
     public string FilePath { get; }
     public VaultState State { get; private set; } = VaultState.Off;
     public int Count => _passwords.Count;
+
+    /// <summary>
+    /// この PC に鍵は保存してあるのに、ファイルを開けない（他の PC でマスターパスワードが変更されたらしい）。
+    /// 「まだ入力していない」と案内を分けるのに使う
+    /// </summary>
+    public bool HasOutdatedKey
+    {
+        get { lock (_lock) return State == VaultState.Locked && _key is not null; }
+    }
 
     /// <summary>中身や状態が変わったとき（他の PC の変更が届いたときも）。UI スレッドとは限らない。</summary>
     public event EventHandler? Changed;
@@ -152,6 +164,58 @@ public sealed class PasswordVault : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// マスターパスワードを変える（開いているときだけ）。今のマスターパスワードが違えば false で、何も変えない。
+    /// 新しい salt で鍵を作り直し、最新の中身を暗号化し直して書く。他の PC は新しいマスターパスワードを入力するまでロック中になる。
+    /// </summary>
+    /// <exception cref="InvalidOperationException">開いていない（同期していない・ロック中）</exception>
+    /// <exception cref="InvalidDataException">保管ファイルを読めない</exception>
+    /// <exception cref="IOException">書き込みに失敗した（元のファイル・鍵のまま）</exception>
+    /// <exception cref="UnauthorizedAccessException">書き込みに失敗した（元のファイル・鍵のまま）</exception>
+    public bool ChangeMasterPassword(string currentPassword, string newPassword)
+    {
+        InvalidOperationException? keyNotSaved = null;
+        lock (_lock)
+        {
+            if (State != VaultState.Unlocked) throw new InvalidOperationException("保管庫が開いていないので、マスターパスワードを変更できません。");
+            if (ReadFile() is not { } file) throw new InvalidDataException("パスワードの保管ファイルを読めませんでした。");
+            // 手元の鍵だけでは変えさせない（席を外した隙に変えられないように）。今のファイルの salt で確かめる
+            var currentKey = DeriveKey(currentPassword, file.Salt, file.Iterations);
+            if (Open(file.Sealed, currentKey) is not { } plain) return false;
+            // 他の PC での変更を取りこぼさないよう、今のファイルの中身を使う
+            Dictionary<string, string> latest;
+            try
+            {
+                latest = new(JsonSerializer.Deserialize<Dictionary<string, string>>(plain) ?? [], StringComparer.OrdinalIgnoreCase);
+            }
+            catch (JsonException)
+            {
+                throw new InvalidDataException("パスワードの保管ファイルを読めませんでした。");
+            }
+
+            var salt = RandomNumberGenerator.GetBytes(16);
+            var key = DeriveKey(newPassword, salt, DefaultIterations);
+            // 先にファイルを書く。失敗したらメモリの鍵も保存した鍵も元のまま（ファイルは一時ファイルからの置き換えなので元のまま）
+            WriteFile(salt, DefaultIterations, key, latest);
+            _key = key;
+            _passwords = latest;
+            ReloadLocked();
+            try
+            {
+                _secrets.SetSecret(_keyName, Convert.ToBase64String(key));
+            }
+            catch (InvalidOperationException e)
+            {
+                // ファイルは変わったので戻さない。この起動中は新しい鍵で使え、次に起動したときに新しいマスターパスワードを聞かれる
+                keyNotSaved = new InvalidOperationException(
+                    "マスターパスワードは変更しましたが、この PC に鍵を保存できませんでした。次に起動したときに、新しいマスターパスワードを入力してください。", e);
+            }
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+        if (keyNotSaved is not null) throw keyNotSaved;
+        return true;
+    }
+
     /// <summary>この PC だけ同期をやめる（鍵を忘れる。ファイルや他の PC には影響しない）</summary>
     public void Forget()
     {
@@ -249,8 +313,13 @@ public sealed class PasswordVault : IDisposable
     private void WriteFile(byte[] salt, int iterations)
     {
         if (_key is null) return;
-        var plain = JsonSerializer.SerializeToUtf8Bytes(_passwords);
-        var json = JsonSerializer.Serialize(new VaultFile { Salt = salt, Iterations = iterations, Sealed = Seal(plain, _key) },
+        WriteFile(salt, iterations, _key, _passwords);
+    }
+
+    private void WriteFile(byte[] salt, int iterations, byte[] key, Dictionary<string, string> passwords)
+    {
+        var plain = JsonSerializer.SerializeToUtf8Bytes(passwords);
+        var json = JsonSerializer.Serialize(new VaultFile { Salt = salt, Iterations = iterations, Sealed = Seal(plain, key) },
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         FerryJson.WriteAtomically(FilePath, json);
     }

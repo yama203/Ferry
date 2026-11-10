@@ -122,6 +122,188 @@ public class PasswordVaultTests
         Assert.Equal(PasswordVault.VaultState.Off, vault.State);
     }
 
+    // MARK: マスターパスワードの変更
+
+    [Fact]
+    public void マスターパスワードを変えると新しいパスワードで別のPCから開ける()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.Combine("passwords.vault");
+        var secrets = new MemorySecretStore();
+        using var vault = new PasswordVault(path, secrets, "k", watch: false);
+        vault.Enable("古いマスター", new Dictionary<Guid, string> { [A] = "a", [B] = "b" });
+        var oldSalt = (string)JsonNode.Parse(File.ReadAllText(path))!["salt"]!;
+        var oldKey = secrets.Secrets["k"];
+
+        Assert.True(vault.ChangeMasterPassword("古いマスター", "新しいマスター"));
+
+        Assert.Equal(PasswordVault.VaultState.Unlocked, vault.State);
+        Assert.Equal("a", vault.GetPassword(A));
+        // 形式は同じで、salt と保存した鍵は新しくなる
+        var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.Equal(["version", "salt", "iterations", "sealed"], json.Select(p => p.Key));
+        Assert.Equal(1, (int)json["version"]!);
+        Assert.NotEqual(oldSalt, (string)json["salt"]!);
+        Assert.Equal(16, Convert.FromBase64String((string)json["salt"]!).Length);
+        Assert.NotEqual(oldKey, secrets.Secrets["k"]);
+        // 次に起動しても新しい鍵で開ける
+        using (var restarted = new PasswordVault(path, secrets, "k", watch: false))
+            Assert.Equal(PasswordVault.VaultState.Unlocked, restarted.State);
+
+        using var other = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        Assert.Equal(PasswordVault.VaultState.Locked, other.State);
+        Assert.False(other.HasOutdatedKey);
+        Assert.True(other.Unlock("新しいマスター"));
+        Assert.Equal("a", other.GetPassword(A));
+        Assert.Equal("b", other.GetPassword(B));
+        Assert.Equal(2, other.Count);
+    }
+
+    [Fact]
+    public void 変更後は古い鍵を持つ別のPCはロック中になり古いパスワードでは開けない()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.Combine("passwords.vault");
+        using var mine = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        mine.Enable("古いマスター", new Dictionary<Guid, string> { [A] = "a" });
+        var otherSecrets = new MemorySecretStore();
+        using var other = new PasswordVault(path, otherSecrets, "k", watch: false);
+        Assert.True(other.Unlock("古いマスター"));
+        Assert.False(other.HasOutdatedKey);
+
+        Assert.True(mine.ChangeMasterPassword("古いマスター", "新しいマスター"));
+
+        // 他の PC の変更が届いた（監視で読み直す）
+        other.Reload();
+        Assert.Equal(PasswordVault.VaultState.Locked, other.State);
+        Assert.True(other.HasOutdatedKey);
+        Assert.Null(other.GetPassword(A));
+        // 鍵を覚えていても、次に起動したときもロック中
+        using (var restarted = new PasswordVault(path, otherSecrets, "k", watch: false))
+        {
+            Assert.Equal(PasswordVault.VaultState.Locked, restarted.State);
+            Assert.True(restarted.HasOutdatedKey);
+        }
+        // 書こうとしても書かない（古い鍵で上書きしない）
+        var before = File.ReadAllText(path);
+        other.SetPassword(B, "b");
+        Assert.Equal(before, File.ReadAllText(path));
+
+        Assert.False(other.Unlock("古いマスター"));
+        Assert.True(other.Unlock("新しいマスター"));
+        Assert.False(other.HasOutdatedKey);
+        Assert.Equal("a", other.GetPassword(A));
+    }
+
+    [Fact]
+    public void 今のマスターパスワードが違うと変更せずファイルも鍵も元のまま()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.Combine("passwords.vault");
+        var secrets = new MemorySecretStore();
+        using var vault = new PasswordVault(path, secrets, "k", watch: false);
+        vault.Enable("マスター", new Dictionary<Guid, string> { [A] = "a" });
+        var file = File.ReadAllText(path);
+        var key = secrets.Secrets["k"];
+
+        Assert.False(vault.ChangeMasterPassword("違う", "新しいマスター"));
+
+        Assert.Equal(file, File.ReadAllText(path));
+        Assert.Equal(key, secrets.Secrets["k"]);
+        Assert.Equal(PasswordVault.VaultState.Unlocked, vault.State);
+        Assert.Equal("a", vault.GetPassword(A));
+        using var other = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        Assert.False(other.Unlock("新しいマスター"));
+        Assert.True(other.Unlock("マスター"));
+    }
+
+    [Fact]
+    public void 変更の直前に別のPCが足したパスワードも残る()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.Combine("passwords.vault");
+        using var mine = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        mine.Enable("マスター", new Dictionary<Guid, string> { [A] = "a" });
+        using var other = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        Assert.True(other.Unlock("マスター"));
+        other.SetPassword(B, "他の PC で追加");
+        // mine はまだ読み直していない
+        Assert.Null(mine.GetPassword(B));
+
+        Assert.True(mine.ChangeMasterPassword("マスター", "新しいマスター"));
+
+        Assert.Equal("他の PC で追加", mine.GetPassword(B));
+        using var third = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        Assert.True(third.Unlock("新しいマスター"));
+        Assert.Equal("a", third.GetPassword(A));
+        Assert.Equal("他の PC で追加", third.GetPassword(B));
+    }
+
+    [Fact]
+    public void ロック中や同期していないときは変更できない()
+    {
+        using var temp = new TempDirectory();
+        var path = temp.Combine("passwords.vault");
+        var offSecrets = new MemorySecretStore();
+        using (var off = new PasswordVault(path, offSecrets, "k", watch: false))
+        {
+            Assert.Throws<InvalidOperationException>(() => off.ChangeMasterPassword("", "新しいマスター"));
+            Assert.False(File.Exists(path));
+            Assert.Empty(offSecrets.Secrets);
+        }
+
+        using (var setup = new PasswordVault(path, new MemorySecretStore(), "k", watch: false))
+            setup.Enable("マスター", new Dictionary<Guid, string> { [A] = "a" });
+        var file = File.ReadAllText(path);
+        var lockedSecrets = new MemorySecretStore();
+        using var locked = new PasswordVault(path, lockedSecrets, "k", watch: false);
+        Assert.Equal(PasswordVault.VaultState.Locked, locked.State);
+        // 今のマスターパスワードが正しくても、開いていなければ変えない
+        Assert.Throws<InvalidOperationException>(() => locked.ChangeMasterPassword("マスター", "新しいマスター"));
+        Assert.Equal(file, File.ReadAllText(path));
+        Assert.Empty(lockedSecrets.Secrets);
+        Assert.Equal(PasswordVault.VaultState.Locked, locked.State);
+    }
+
+    [Fact]
+    public void 書き込みに失敗したら元の状態のまま()
+    {
+        using var temp = new TempDirectory();
+        var folder = temp.Combine("shared");
+        var path = Path.Combine(folder, "passwords.vault");
+        var secrets = new MemorySecretStore();
+        using var vault = new PasswordVault(path, secrets, "k", watch: false);
+        vault.Enable("マスター", new Dictionary<Guid, string> { [A] = "a" });
+        var file = File.ReadAllText(path);
+        var key = secrets.Secrets["k"];
+
+        // 書き込めないようにする（Mac・Linux はフォルダを読み取り専用に、Windows はファイルを読み取り専用に）
+        if (OperatingSystem.IsWindows()) File.SetAttributes(path, FileAttributes.ReadOnly);
+        else File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            var error = Assert.ThrowsAny<Exception>(() => vault.ChangeMasterPassword("マスター", "新しいマスター"));
+            Assert.True(error is IOException or UnauthorizedAccessException, error.GetType().Name);
+        }
+        finally
+        {
+            if (OperatingSystem.IsWindows()) File.SetAttributes(path, FileAttributes.Normal);
+            else File.SetUnixFileMode(folder, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        Assert.Equal(file, File.ReadAllText(path));
+        Assert.Equal(key, secrets.Secrets["k"]);
+        // 一時ファイルも残さない
+        Assert.Equal(["passwords.vault"], Directory.GetFiles(folder).Select(Path.GetFileName));
+        // メモリの鍵も元のまま（読み直しても開けて、書き込める）
+        vault.Reload();
+        Assert.Equal(PasswordVault.VaultState.Unlocked, vault.State);
+        vault.SetPassword(B, "b");
+        using var other = new PasswordVault(path, new MemorySecretStore(), "k", watch: false);
+        Assert.True(other.Unlock("マスター"));
+        Assert.Equal("b", other.GetPassword(B));
+    }
+
     [Fact]
     public void Mac版が書いた保管庫のファイルを読める()
     {

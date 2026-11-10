@@ -453,6 +453,7 @@ public sealed partial class MainWindow : Window
     private void UpdateVaultBar()
     {
         // 更新のお知らせと同じ場所なので、更新のお知らせが出ていればそちらを優先する
+        VaultBar.Message = AppServices.MasterPasswordMessage;
         VaultBar.IsOpen = AppServices.NeedsMasterPassword && !UpdateBar.IsOpen;
     }
 

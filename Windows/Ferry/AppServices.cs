@@ -116,10 +116,16 @@ public static class AppServices
         VaultsChanged?.Invoke(null, EventArgs.Empty);
     }
 
-    /// <summary>マスターパスワードの入力が必要な保管庫があるか（他の PC で同期を始めたが、この PC ではまだ）</summary>
+    /// <summary>マスターパスワードの入力が必要な保管庫があるか（他の PC で同期を始めたが、この PC ではまだ。または他の PC で変更された）</summary>
     public static bool NeedsMasterPassword =>
         Passwords.Personal?.State == PasswordVault.VaultState.Locked
         || Passwords.Shared?.State == PasswordVault.VaultState.Locked;
+
+    /// <summary>マスターパスワードの入力を求める帯の文面（鍵は保存してあるのに開けないときは、変更されたらしいと伝える）</summary>
+    public static string MasterPasswordMessage =>
+        Passwords.Personal?.HasOutdatedKey == true || Passwords.Shared?.HasOutdatedKey == true
+            ? "この PC に保存してあるマスターパスワードでは、パスワードの保管庫を開けなくなりました。他の PC でマスターパスワードが変更されたかもしれません。新しいマスターパスワードを入力してください。"
+            : "他の PC で設定されたパスワードの同期があります。マスターパスワードを入力すると、この PC でも使えます。";
 
     /// <summary>UI スレッドで実行する（接続先の変更通知は別のスレッドから届くことがある）</summary>
     public static void OnUi(Action action)
