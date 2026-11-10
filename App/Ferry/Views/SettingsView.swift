@@ -276,6 +276,8 @@ private struct PasswordSyncSettings: View {
     @State private var message: String?
     @State private var confirmingDisable = false
     @State private var addResult: String?
+    @State private var isChangingMaster = false
+    @State private var changeResult: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -350,13 +352,24 @@ private struct PasswordSyncSettings: View {
 
     private func unlock(_ vault: PasswordVault) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(kind == .personal ? "他の PC でパスワードの同期が設定されています" : "会社でパスワードの同期が設定されています",
-                  systemImage: "lock.icloud")
-                .font(.headline)
-            Text("マスターパスワードを入力すると、この Mac でも同期したパスワードが使えるようになります。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            SecureField("マスターパスワード", text: $master)
+            // この Mac に鍵があるのに開けない = 他の PC でマスターパスワードが変更された（たぶん）
+            if vault.keyRejected {
+                Label(kind == .personal ? "マスターパスワードが変更されたようです" : "会社のマスターパスワードが変更されたようです",
+                      systemImage: "lock.icloud")
+                    .font(.headline)
+                Text("ほかの PC でマスターパスワードが変更されたため、この Mac に保存していた鍵では保管庫を開けません。新しいマスターパスワードを入力してください。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label(kind == .personal ? "他の PC でパスワードの同期が設定されています" : "会社でパスワードの同期が設定されています",
+                      systemImage: "lock.icloud")
+                    .font(.headline)
+                Text("マスターパスワードを入力すると、この Mac でも同期したパスワードが使えるようになります。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            SecureField(vault.keyRejected ? "新しいマスターパスワード" : "マスターパスワード", text: $master)
                 .onSubmit { unlockVault(vault) }
             HStack {
                 Spacer()
@@ -399,12 +412,27 @@ private struct PasswordSyncSettings: View {
                 Spacer()
                 Button("同期をやめる…", role: .destructive) { confirmingDisable = true }
             }
+            HStack {
+                Button("マスターパスワードを変更…") {
+                    changeResult = nil
+                    isChangingMaster = true
+                }
+                Spacer()
+            }
             if let addResult {
                 Text(addResult)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
+            if let changeResult {
+                Text(changeResult)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .sheet(isPresented: $isChangingMaster) {
+            ChangeMasterPasswordSheet(kind: kind, vault: vault) { result in changeResult = result }
         }
         .confirmationDialog("パスワードの同期をやめますか？", isPresented: $confirmingDisable) {
             Button("同期をやめる", role: .destructive) { vault.disable() }
@@ -412,6 +440,92 @@ private struct PasswordSyncSettings: View {
             Text(kind == .personal
                  ? "すべての PC で同期が止まります。iCloud Drive の暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。"
                  : "会社の全員の同期が止まります。共有フォルダの暗号化したファイルは削除し、パスワードはこの Mac のキーチェーンに残します。")
+        }
+    }
+}
+
+/// マスターパスワードの変更（今のマスターパスワード・新しいもの・確認の再入力）
+private struct ChangeMasterPasswordSheet: View {
+    let kind: PasswordSyncSettings.Kind
+    let vault: PasswordVault
+    /// 変更できたときの知らせ
+    let onChanged: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var current = ""
+    @State private var new = ""
+    @State private var confirm = ""
+    @State private var message: String?
+    @State private var isWorking = false
+
+    private var masterName: String { kind == .personal ? "マスターパスワード" : "会社のマスターパスワード" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("\(masterName)を変更")
+                .font(.headline)
+            // 変えた後に困らないよう、何が起きるかを先に出す
+            VStack(alignment: .leading, spacing: 6) {
+                Text(kind == .personal
+                     ? "変更すると、ほかの Mac・Windows の Ferry は、新しいマスターパスワードを入力するまで保管庫を開けなくなります。"
+                     : "変更すると、ほかの PC・ほかの人の Ferry は、新しいマスターパスワードを入力するまで保管庫を開けなくなります。新しいマスターパスワードは、別の方法（口頭など）で伝えてください。")
+                Text(kind == .personal
+                     ? "以前のマスターパスワードを知っている人は、変更前の保管庫の写し（iCloud Drive・Dropbox の履歴や手元のコピー）から、そのとき入っていたパスワードを読めます。漏れたおそれがあって変えるときは、サーバー側のパスワードも変更してください。"
+                     : "以前のマスターパスワードを知っている人は、変更前の保管庫の写し（Dropbox の履歴や手元のコピー）から、そのとき入っていたパスワードを読めます。退職した人が出たときなどは、サーバー側のパスワードも変更してください。")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            SecureField("今の\(masterName)", text: $current)
+            SecureField("新しい\(masterName)", text: $new)
+            SecureField("もう一度入力", text: $confirm)
+                .onSubmit(change)
+            if let message {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                if isWorking {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                Button("キャンセル") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("変更", action: change)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(current.isEmpty || new.isEmpty || confirm.isEmpty || isWorking)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+        .disabled(isWorking)
+    }
+
+    private func change() {
+        guard !current.isEmpty, !isWorking else { return }
+        // 始めるときと同じ決まり
+        guard new.count >= 8 else { return message = "8 文字以上にしてください" }
+        guard new == confirm else { return message = "2 つの入力が一致しません" }
+        guard new != current else { return message = "今と同じ\(masterName)です" }
+        isWorking = true
+        message = nil
+        Task {
+            defer { isWorking = false }
+            do {
+                let savedKey = try await vault.changeMasterPassword(current: current, new: new)
+                var text = "\(masterName)を変更しました。\(kind == .personal ? "ほかの PC" : "ほかの人の Ferry")では、新しい\(masterName)の入力が必要です。"
+                if !savedKey {
+                    text += "この Mac のキーチェーンに新しい鍵を保存できなかったので、次に Ferry を起動したときに新しい\(masterName)を入力してください。"
+                }
+                onChanged(text)
+                dismiss()
+            } catch {
+                message = error.localizedDescription
+            }
         }
     }
 }

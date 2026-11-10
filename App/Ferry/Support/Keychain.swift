@@ -33,15 +33,17 @@ enum Keychain {
         return (String(data: data, encoding: .utf8), status)
     }
 
-    static func setSecret(_ password: String?, account: String) {
+    /// 戻り値は保存（削除）できたか
+    @discardableResult
+    static func setSecret(_ password: String?, account: String) -> Bool {
         let query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
             kSecAttrService: service,
             kSecAttrAccount: account,
         ]
         guard let password, !password.isEmpty else {
-            SecItemDelete(query as CFDictionary)
-            return
+            let status = SecItemDelete(query as CFDictionary)
+            return status == errSecSuccess || status == errSecItemNotFound
         }
         let data = Data(password.utf8)
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData: data] as CFDictionary)
@@ -49,8 +51,9 @@ enum Keychain {
             var item = query
             item[kSecValueData] = data
             item[kSecAttrLabel] = "Ferry"
-            SecItemAdd(item as CFDictionary, nil)
+            return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
         }
+        return status == errSecSuccess
     }
 
     /// 他のアプリ（Transmit など）がキーチェーンに保存したインターネットパスワードを探す。

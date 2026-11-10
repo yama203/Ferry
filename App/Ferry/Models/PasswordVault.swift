@@ -1,4 +1,3 @@
-import CommonCrypto
 import CryptoKit
 import Foundation
 import Observation
@@ -7,7 +6,7 @@ import Observation
 /// - 自分の保管庫: iCloud Drive/Ferry/passwords.vault（自分の Mac・Windows の間で同期。鍵の名前 vault-key）
 /// - 会社の保管庫: <共有フォルダ>/passwords.vault（会社のマスターパスワードを知っている人の間で同期。鍵の名前 shared-vault-key）
 /// 鍵は各 PC のキーチェーン（Windows は資格情報マネージャー）に保存するので、マスターパスワードの入力は PC ごとに 1 回だけ。
-/// Windows 版の PasswordVault と同じ形式。
+/// Windows 版の PasswordVault と同じ形式（形式と暗号は VaultCipher）。
 @MainActor @Observable
 final class PasswordVault {
     enum State: Equatable {
@@ -18,18 +17,10 @@ final class PasswordVault {
         case unlocked
     }
 
-    enum VaultError: LocalizedError {
-        case wrongPassword, unreadable
-        var errorDescription: String? {
-            switch self {
-            case .wrongPassword: "マスターパスワードが違います"
-            case .unreadable: "パスワードの保管ファイルを読めませんでした"
-            }
-        }
-    }
-
     private(set) var state: State = .off
     private(set) var count = 0
+    /// ロック中のうち、この Mac に鍵はあるのに開けない場合（他の PC でマスターパスワードが変更されたとき）
+    private(set) var keyRejected = false
 
     let fileURL: URL
     /// キーチェーンに鍵を保存する名前（自分用と会社用で分ける）
@@ -38,15 +29,7 @@ final class PasswordVault {
     @ObservationIgnored private var passwords: [String: String] = [:]
     @ObservationIgnored private var presenter: VaultPresenter?
 
-    private static let iterations = 600_000
-
-    private struct VaultFile: Codable {
-        var version = 1
-        var salt: Data
-        var iterations: Int
-        /// AES-GCM で暗号化した {サーバー ID: パスワード} の JSON
-        var sealed: Data
-    }
+    private typealias VaultFile = VaultCipher.File
 
     init(directory: URL, keyAccount: String = "vault-key") {
         fileURL = directory.appendingPathComponent("passwords.vault")
@@ -109,11 +92,19 @@ final class PasswordVault {
 
     /// 同期を始める。この Mac に保存してあるパスワードを最初の中身にする。
     func enable(masterPassword: String, initial: [UUID: String]) throws {
-        let salt = Data((0..<16).map { _ in UInt8.random(in: 0...255) })
-        let derived = try Self.deriveKey(masterPassword, salt: salt, iterations: Self.iterations)
+        let salt = VaultCipher.newSalt()
+        let derived = try VaultCipher.deriveKey(masterPassword, salt: salt, iterations: VaultCipher.iterations)
+        let previousKey = key
         key = derived
         passwords = Dictionary(uniqueKeysWithValues: initial.map { ($0.key.uuidString, $0.value) })
-        try writeFile(salt: salt, iterations: Self.iterations)
+        do {
+            try writeFile(salt: salt, iterations: VaultCipher.iterations)
+        } catch {
+            // 書けなかったら始めていないのと同じにする
+            key = previousKey
+            reload()
+            throw error
+        }
         Keychain.setSecret(derived.withUnsafeBytes { Data($0) }.base64EncodedString(), account: keyAccount)
         reload()
     }
@@ -121,11 +112,37 @@ final class PasswordVault {
     /// 他の Mac で始めた同期を、この Mac でも使えるようにする
     func unlock(masterPassword: String) throws {
         guard let file = readFile() else { throw VaultError.unreadable }
-        let derived = try Self.deriveKey(masterPassword, salt: file.salt, iterations: file.iterations)
-        guard (try? Self.open(file.sealed, with: derived)) != nil else { throw VaultError.wrongPassword }
+        let derived = try VaultCipher.deriveKey(masterPassword, salt: file.salt, iterations: file.iterations)
+        guard (try? VaultCipher.open(file.sealed, with: derived)) != nil else { throw VaultError.wrongPassword }
         key = derived
         Keychain.setSecret(derived.withUnsafeBytes { Data($0) }.base64EncodedString(), account: keyAccount)
         reload()
+    }
+
+    /// マスターパスワードを変える（すべての PC で）。開いているときだけ。
+    /// 戻り値は、この Mac のキーチェーンにも新しい鍵を保存できたか（できなくてもファイルは変わっていて、この起動中は使える）。
+    /// 他の PC は手元の鍵で開けなくなってロック中になり、新しいマスターパスワードを入れると使える（Windows 版も同じ）。
+    @discardableResult
+    func changeMasterPassword(current: String, new: String) async throws -> Bool {
+        guard state == .unlocked else { throw VaultError.locked }
+        // キーチェーンの鍵ではなく、入力した今のマスターパスワードで最新のファイルを開けることを確かめる
+        // （席を外した隙に変えられないように。最新を開くので、他の PC での変更も引き継ぐ）
+        guard let file = readFile() else { throw VaultError.unreadable }
+        // 鍵を 2 回作るので時間がかかる。画面が固まらないよう、メインスレッドの外で行う
+        let rekeyed = try await Task.detached { try VaultCipher.rekeyed(file, current: current, new: new) }.value
+
+        // 待っている間に同期をやめた・他の PC の変更が届いた場合は、古い中身で上書きしない
+        guard state == .unlocked else { throw VaultError.locked }
+        guard readFile() == file else { throw VaultError.changedMeanwhile }
+
+        // 先にファイルを書く。失敗したらメモリ・キーチェーンの鍵もファイルも元のまま
+        try write(JSONEncoder().encode(rekeyed.file))
+        key = rekeyed.key
+        passwords = rekeyed.passwords
+        // キーチェーンに保存できなかったら、次の起動でロック中になり、新しいマスターパスワードを聞くだけで済む
+        let saved = Keychain.setSecret(rekeyed.key.withUnsafeBytes { Data($0) }.base64EncodedString(), account: keyAccount)
+        reload()
+        return saved
     }
 
     /// 同期をやめる（すべての PC で）。同期していたパスワードはこの Mac のキーチェーンに残す。
@@ -152,20 +169,22 @@ final class PasswordVault {
         try? FileManager.default.startDownloadingUbiquitousItem(at: fileURL)
         guard let file = readFile() else {
             state = .off
+            keyRejected = false
             passwords = [:]
             count = 0
             return
         }
-        guard let key, let decrypted = try? Self.open(file.sealed, with: key),
-              let dictionary = try? JSONDecoder().decode([String: String].self, from: decrypted) else {
-            // 鍵が無い、またはマスターパスワードが変わった
+        guard let key, let dictionary = VaultCipher.passwords(in: file, with: key) else {
+            // 鍵が無い（この Mac でまだ入力していない）、または鍵が合わない（他の PC でマスターパスワードが変わった）
             state = .locked
+            keyRejected = key != nil
             passwords = [:]
             count = 0
             return
         }
         passwords = dictionary
         count = dictionary.count
+        keyRejected = false
         state = .unlocked
     }
 
@@ -188,40 +207,26 @@ final class PasswordVault {
 
     private func writeFile(salt: Data?, iterations: Int) throws {
         guard let key, let salt else { return }
-        let plain = try JSONEncoder().encode(passwords)
-        let sealed = try AES.GCM.seal(plain, using: key).combined!
-        let data = try JSONEncoder().encode(VaultFile(salt: salt, iterations: iterations, sealed: sealed))
-        var coordinatorError: NSError?
-        NSFileCoordinator(filePresenter: presenter).coordinate(writingItemAt: fileURL, options: .forReplacing,
-                                                               error: &coordinatorError) { url in
-            try? data.write(to: url, options: .atomic)
-        }
+        let sealed = try VaultCipher.seal(passwords, with: key)
+        try write(JSONEncoder().encode(VaultFile(salt: salt, iterations: iterations, sealed: sealed)))
         count = passwords.count
     }
 
-    // MARK: - 暗号
-
-    private static func deriveKey(_ password: String, salt: Data, iterations: Int) throws -> SymmetricKey {
-        var derived = Data(count: 32)
-        let passwordData = Data(password.utf8)
-        let status = derived.withUnsafeMutableBytes { derivedBytes in
-            salt.withUnsafeBytes { saltBytes in
-                passwordData.withUnsafeBytes { passwordBytes in
-                    CCKeyDerivationPBKDF(
-                        CCPBKDFAlgorithm(kCCPBKDF2),
-                        passwordBytes.baseAddress?.assumingMemoryBound(to: CChar.self), passwordData.count,
-                        saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), salt.count,
-                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), UInt32(iterations),
-                        derivedBytes.baseAddress?.assumingMemoryBound(to: UInt8.self), 32)
-                }
+    /// 書き込みの失敗も知らせる（マスターパスワードの変更では、書けたかどうかで鍵を切り替えるため）
+    private func write(_ data: Data) throws {
+        var coordinatorError: NSError?
+        var writeError: Error?
+        NSFileCoordinator(filePresenter: presenter).coordinate(writingItemAt: fileURL, options: .forReplacing,
+                                                               error: &coordinatorError) { url in
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                writeError = error
             }
         }
-        guard status == kCCSuccess else { throw VaultError.unreadable }
-        return SymmetricKey(data: derived)
-    }
-
-    private static func open(_ sealed: Data, with key: SymmetricKey) throws -> Data {
-        try AES.GCM.open(AES.GCM.SealedBox(combined: sealed), using: key)
+        if let error = coordinatorError ?? writeError {
+            throw VaultError.writeFailed(error.localizedDescription)
+        }
     }
 }
 

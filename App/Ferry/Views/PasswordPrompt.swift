@@ -60,13 +60,20 @@ struct PasswordPrompt: View {
             }
 
             // 他の PC（共有の接続先は会社）でパスワード同期を始めていて、この Mac ではまだ解除していない場合
-            if Passwords.targetVault(for: session.server.id)?.state == .locked {
+            if let vault = Passwords.targetVault(for: session.server.id), vault.state == .locked {
                 Divider().frame(width: 300).padding(.vertical, 6)
                 Label(Passwords.isShared(session.server.id) ? "会社で同期したパスワードを使う" : "他の PC で同期したパスワードを使う",
                       systemImage: "key.icloud")
                     .font(.headline)
+                // この Mac に鍵があるのに開けない = 他の PC でマスターパスワードが変更された（たぶん）
+                if vault.keyRejected {
+                    Text("マスターパスワードが変更されたようです。新しいマスターパスワードを入力してください。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
                 HStack {
-                    SecureField("マスターパスワード", text: $master)
+                    SecureField(vault.keyRejected ? "新しいマスターパスワード" : "マスターパスワード", text: $master)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 200)
                         .onSubmit(unlockVault)
