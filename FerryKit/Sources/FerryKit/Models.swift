@@ -174,4 +174,65 @@ public enum RemotePath {
     public static func name(of path: String) -> String {
         path.split(separator: "/").last.map(String.init) ?? "/"
     }
+
+    /// 転送の途中のファイルに付ける名前の終わり（ダウンロードは「名前.ferrypart」、安全なアップロードは「.名前.ferrypart」）
+    public static let partialSuffix = ".ferrypart"
+
+    /// 安全なアップロードで、置き換える前に送る一時的な名前（同じフォルダに置く）
+    public static func temporaryName(for name: String) -> String {
+        "." + name + partialSuffix
+    }
+
+    /// 転送の途中で残ったファイルか（同期で運ばない）
+    public static func isPartialFile(_ name: String) -> Bool {
+        name.hasSuffix(partialSuffix)
+    }
+}
+
+public enum FilePermissions {
+    /// "rwxr-xr-x" 形式を "755" のような 8 進数の文字列にする。setuid・setgid・sticky（s / S / t / T）があれば
+    /// "4755" のように 4 桁にする。形式が違えば nil
+    public static func octal(_ permissions: String) -> String? {
+        let chars = Array(permissions)
+        guard chars.count == 9 else { return nil }
+        var special = 0
+        var digits = ""
+        for group in 0..<3 {
+            let (r, w, x) = (chars[group * 3], chars[group * 3 + 1], chars[group * 3 + 2])
+            guard r == "r" || r == "-", w == "w" || w == "-" else { return nil }
+            let specialChar: Set<Character> = group == 2 ? ["t", "T"] : ["s", "S"]
+            guard x == "x" || x == "-" || specialChar.contains(x) else { return nil }
+            if specialChar.contains(x) {
+                special |= 4 >> group
+            }
+            digits += String((r == "r" ? 4 : 0) + (w == "w" ? 2 : 0) + (x == "x" || x == "s" || x == "t" ? 1 : 0))
+        }
+        return special == 0 ? digits : String(special) + digits
+    }
+}
+
+/// サーバーのファイルの「サイズと更新日時」（一覧に出た値）。エディタで開いた後に、他の人がサーバー側で変えていないかを調べる
+public struct RemoteFileStamp: Equatable, Sendable {
+    public enum Change: Equatable, Sendable {
+        case unchanged, modified, deleted
+    }
+
+    public var size: Int64?
+    public var modified: Date?
+
+    public init(size: Int64?, modified: Date?) {
+        self.size = size
+        self.modified = modified
+    }
+
+    public init(_ item: RemoteItem) {
+        self.init(size: item.size, modified: item.modified)
+    }
+
+    /// そのファイルのあるフォルダの今の一覧と比べる。どちらも同じ形式の一覧の値なので、粗さは考えずにそのまま比べる
+    public func change(of path: String, in listing: [RemoteItem]) -> Change {
+        let name = RemotePath.name(of: path)
+        guard let current = listing.first(where: { $0.name == name }), !current.isDirectory else { return .deleted }
+        return RemoteFileStamp(current) == self ? .unchanged : .modified
+    }
 }

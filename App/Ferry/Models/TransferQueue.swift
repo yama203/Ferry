@@ -25,6 +25,8 @@ final class TransferItem: Identifiable {
     var destinationModified: Date?
     /// 転送先の更新日時の粗さ（秒）。サーバーの一覧は分単位・日単位のことがある。ローカルは 0
     var destinationModifiedPrecision: TimeInterval = 0
+    /// アップロード先にある同名ファイルの権限（"rw-r--r--" 形式）。一時ファイルから置き換えた後に同じ権限に戻す
+    var destinationPermissions: String?
 
     @ObservationIgnored var task: Task<Void, Error>?
     @ObservationIgnored private var waiters: [CheckedContinuation<Void, Never>] = []
@@ -77,7 +79,8 @@ struct PendingConflict: Identifiable {
     var firstConflictName: String { items.first(where: \.destinationExists)?.name ?? "" }
 }
 
-/// 転送の待ち行列。転送は専用の接続で 1 件ずつ処理し、フォルダの中身の一覧は一覧表示用の接続で取る。
+/// 転送の待ち行列。転送は専用の接続（設定の「同時に転送する数」まで）で先頭から順に同時に処理し、
+/// フォルダの中身の一覧は一覧表示用の接続で取る。
 @MainActor @Observable
 final class TransferQueue {
     private(set) var items: [TransferItem] = []
@@ -85,24 +88,46 @@ final class TransferQueue {
     /// フォルダの中身を調べている最中か
     private(set) var isPreparing = false
 
-    @ObservationIgnored private let client: RemoteClient
+    @ObservationIgnored private let server: ServerConfig
+    @ObservationIgnored private var password: String?
+    /// 転送用の接続。1 本目は最初から持ち、2 本目以降は同時に転送するときに作る
+    @ObservationIgnored private var connections: [TransferConnection]
+    /// 接続がつながらなかった（共用サーバーの同時接続数の上限など）ために減らした後の接続の数。このセッションの間は増やさない
+    @ObservationIgnored private var connectionLimit: Int?
     @ObservationIgnored private let lister: RemoteClient
     @ObservationIgnored private let excludeRules: () -> ExcludeRules
-    @ObservationIgnored private var runner: Task<Void, Never>?
     /// 待ち行列が空になったとき（両ペインの再読み込み用）
     @ObservationIgnored var onIdle: (() -> Void)?
     /// 完了通知に出す接続先の名前
     @ObservationIgnored var serverName = ""
 
-    init(client: RemoteClient, lister: RemoteClient, excludeRules: @escaping () -> ExcludeRules) {
-        self.client = client
+    init(server: ServerConfig, password: String?, lister: RemoteClient, excludeRules: @escaping () -> ExcludeRules) {
+        self.server = server
+        self.password = password
+        connections = [TransferConnection(client: RemoteClient(server: server, password: password))]
         self.lister = lister
         self.excludeRules = excludeRules
     }
 
     var activeCount: Int { items.filter(\.isActive).count }
-    /// 転送を処理している最中か（終わると onIdle を呼ぶ）
-    var isRunning: Bool { runner != nil }
+    /// 転送を処理している最中か（全部の接続が空くと onIdle を呼ぶ）
+    var isRunning: Bool { connections.contains(where: \.isBusy) }
+
+    /// 設定「同時に転送する数」（1〜4）。次に始まる転送から効く
+    static let connectionsKey = "transferConnections"
+    static let defaultConnections = 3
+    /// 設定「アップロードは一時ファイルに送ってから置き換える」
+    static let safeUploadKey = "safeUpload"
+
+    private static var maxConnections: Int {
+        min(max(UserDefaults.standard.object(forKey: connectionsKey) as? Int ?? defaultConnections, 1), 4)
+    }
+
+    /// パスワードを後から設定する（接続時に入力された場合など）。これから作る接続にも使う
+    func setPassword(_ password: String?) {
+        self.password = password
+        connections.forEach { $0.client.setPassword(password) }
+    }
 
     // MARK: - アップロード
 
@@ -124,11 +149,14 @@ final class TransferQueue {
         submit(batch, direction: .upload)
     }
 
-    /// エディタで保存されたファイルをそのままアップロードする（確認なし）
+    /// エディタで保存されたファイルをそのままアップロードする（確認なし）。
+    /// exists … サーバーにまだあるか（開いたファイルなので通常はある）。permissions … サーバーのファイルの権限
     @discardableResult
-    func uploadEdited(_ url: URL, to remotePath: String) -> TransferItem {
+    func uploadEdited(_ url: URL, to remotePath: String, exists: Bool = true, permissions: String? = nil) -> TransferItem {
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let item = TransferItem(direction: .upload, localURL: url, remotePath: remotePath, total: Int64(size))
+        item.destinationExists = exists
+        item.destinationPermissions = permissions
         submit([item], direction: .upload, confirmOverwrite: false, notifies: false)
         return item
     }
@@ -184,6 +212,7 @@ final class TransferQueue {
                 item.destinationExists = true
                 item.destinationModified = remote.modified
                 item.destinationModifiedPrecision = remote.modifiedPrecision
+                item.destinationPermissions = remote.permissions
             }
         }
     }
@@ -343,21 +372,32 @@ final class TransferQueue {
 
     // MARK: - 実行
 
+    /// 待っている項目を先頭から順に、空いている接続（足りなければ作る）に割り当てる
     private func pump() {
-        guard runner == nil else { return }
-        runner = Task { [weak self] in
-            while let self, let next = self.items.first(where: { $0.state == .waiting }) {
-                await self.run(next)
-            }
-            self?.runner = nil
-            self?.onIdle?()
+        while let next = items.first(where: { $0.state == .waiting }), let connection = idleConnection() {
+            run(next, on: connection)
         }
     }
 
-    private func run(_ item: TransferItem) async {
+    private func idleConnection() -> TransferConnection? {
+        let limit = min(Self.maxConnections, connectionLimit ?? .max)
+        guard connections.filter(\.isBusy).count < limit else { return nil }
+        if let idle = connections.first(where: { !$0.isBusy }) {
+            return idle
+        }
+        let connection = TransferConnection(client: RemoteClient(server: server, password: password))
+        connections.append(connection)
+        return connection
+    }
+
+    /// 中止に備えて、状態と転送のタスクはここで（割り当てたその場で）設定する
+    private func run(_ item: TransferItem, on connection: TransferConnection) {
+        connection.isBusy = true
         item.setState(.running)
         let throttle = ProgressThrottle()
         let progress: RemoteClient.Progress = { done, total in
+            // 間引く前に記録する（画面用の item.done は間引いていて、メインスレッドへの反映も遅れる）
+            if done > 0 { throttle.markStarted() }
             guard throttle.shouldReport() else { return }
             Task { @MainActor in
                 item.done = done
@@ -365,11 +405,16 @@ final class TransferQueue {
             }
         }
 
-        let client = self.client
+        let client = connection.client
+        // 同名のファイルがあると分かっているときだけ一時ファイルから置き換える。新しいファイル・分からないときは直接送る
+        let replacing = item.destinationExists
+            && (UserDefaults.standard.object(forKey: Self.safeUploadKey) as? Bool ?? true)
+        let permissions = item.destinationPermissions
         let task = Task {
             switch item.direction {
             case .upload:
-                try await client.upload(item.localURL, to: item.remotePath, progress: progress)
+                try await client.upload(item.localURL, to: item.remotePath, replacingExisting: replacing,
+                                        permissions: permissions, progress: progress)
             case .download:
                 try FileManager.default.createDirectory(at: item.localURL.deletingLastPathComponent(),
                                                         withIntermediateDirectories: true)
@@ -378,24 +423,58 @@ final class TransferQueue {
             }
         }
         item.task = task
+        Task { await finish(item, task: task, on: connection, progress: throttle) }
+    }
 
+    private func finish(_ item: TransferItem, task: Task<Void, Error>, on connection: TransferConnection,
+                        progress: ProgressThrottle) async {
         do {
             try await task.value
             item.done = item.total
             item.setState(.finished)
         } catch let error as FerryError where error.kind == .cancelled {
             item.setState(.cancelled)
+        } catch let error as FerryError where connections.count > 1 && !task.isCancelled && !progress.hasStarted
+            && (error.kind == .connectionFailed || error.kind == .loginFailed) {
+            // 複数の接続のうち 1 本が、まだ 1 バイトも送れないうちにつながらないのは、同時接続数の上限のことが多い。
+            // 項目は待ちに戻し、この接続は使うのをやめて残りで続ける。同時につなぎに行くので、上限に当たるのは 1 本目のこともある。
+            // 最後の 1 本なら今までどおり失敗にする。少しでも進んだ後の失敗（一時的に回線が切れたなど）は接続を減らさず、その項目の失敗にする
+            connections.removeAll { $0 === connection }
+            connectionLimit = connections.count
+            item.done = 0
+            item.setState(.waiting)
         } catch {
             item.setState(task.isCancelled ? .cancelled : .failed(error.localizedDescription))
         }
         item.task = nil
+        connection.isBusy = false
+        pump()
+        if !isRunning {
+            onIdle?()
+        }
     }
 }
 
-/// curl の進捗コールバックは頻繁に呼ばれるので、画面更新は 0.1 秒ごとに間引く
+/// 転送用の接続 1 本と、転送中かどうか
+@MainActor
+private final class TransferConnection {
+    let client: RemoteClient
+    var isBusy = false
+
+    init(client: RemoteClient) {
+        self.client = client
+    }
+}
+
+/// curl の進捗コールバックは頻繁に呼ばれるので、画面更新は 0.1 秒ごとに間引く。
+/// 1 バイトでも進んだかは、間引かずに記録する（つなぐ段階の失敗と、途中の失敗を分けるため）
 private final class ProgressThrottle: @unchecked Sendable {
     private let lock = NSLock()
     private var last = Date.distantPast
+    private var started = false
+
+    var hasStarted: Bool { lock.withLock { started } }
+    func markStarted() { lock.withLock { started = true } }
 
     func shouldReport() -> Bool {
         lock.withLock {

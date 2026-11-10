@@ -9,6 +9,8 @@ enum SyncPlanner {
         var modified: Date?
         /// 更新日時の粗さ（秒）。リモートは一覧の形式による、ローカルは 0
         var modifiedPrecision: TimeInterval = 0
+        /// リモートの権限（"rw-r--r--" 形式）。ローカルは nil
+        var permissions: String?
     }
 
     struct Change: Identifiable {
@@ -18,6 +20,8 @@ enum SyncPlanner {
         let size: Int64
         /// 転送元の更新日時（転送後に転送先の更新日時をこれに揃える）
         let modified: Date?
+        /// 変更のとき、転送先にあるファイルの権限（アップロードで一時ファイルから置き換えた後に戻す）
+        var destinationPermissions: String?
         var id: String { relativePath }
     }
 
@@ -44,7 +48,8 @@ enum SyncPlanner {
         }
         let rootPath = root.standardizedFileURL.path
         while let url = enumerator.nextObject() as? URL {
-            if rules.excludes(url.lastPathComponent) {
+            // 転送の途中で残ったファイル（.ferrypart）は運ばない
+            if rules.excludes(url.lastPathComponent) || RemotePath.isPartialFile(url.lastPathComponent) {
                 enumerator.skipDescendants()
                 continue
             }
@@ -64,10 +69,11 @@ enum SyncPlanner {
         while let relativeDirectory = pending.popLast() {
             let directory = relativeDirectory.isEmpty ? root : RemotePath.join(root, relativeDirectory)
             await onFolder(directory)
-            for item in try await client.list(directory) where !rules.excludes(item.name) {
+            for item in try await client.list(directory)
+            where !rules.excludes(item.name) && !RemotePath.isPartialFile(item.name) {
                 let relative = relativeDirectory.isEmpty ? item.name : relativeDirectory + "/" + item.name
                 result[relative] = Entry(isDirectory: item.isDirectory, size: item.size, modified: item.modified,
-                                         modifiedPrecision: item.modifiedPrecision)
+                                         modifiedPrecision: item.modifiedPrecision, permissions: item.permissions)
                 if item.isDirectory {
                     pending.append(relative)
                 }
@@ -97,7 +103,7 @@ enum SyncPlanner {
             }
             if sizeChanged || isNewer {
                 plan.changes.append(Change(relativePath: path, reason: .changed, size: entry.size ?? 0,
-                                           modified: entry.modified))
+                                           modified: entry.modified, destinationPermissions: existing.permissions))
             }
         }
 

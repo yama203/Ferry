@@ -360,10 +360,14 @@ struct SyncView: View {
         }
 
         let items = plan.changes.map { change in
-            TransferItem(direction: direction,
-                         localURL: localRoot.appendingPathComponent(change.relativePath),
-                         remotePath: RemotePath.join(remoteRoot, change.relativePath),
-                         total: change.size, sourceModified: change.modified)
+            let item = TransferItem(direction: direction,
+                                    localURL: localRoot.appendingPathComponent(change.relativePath),
+                                    remotePath: RemotePath.join(remoteRoot, change.relativePath),
+                                    total: change.size, sourceModified: change.modified)
+            // 変更 = 転送先にある（アップロードは一時ファイルから置き換える）、新規 = 無い
+            item.destinationExists = change.reason == .changed
+            item.destinationPermissions = change.destinationPermissions
+            return item
         }
         session.transfers.enqueuePlanned(items)
         if items.isEmpty {

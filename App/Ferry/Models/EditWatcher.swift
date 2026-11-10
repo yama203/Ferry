@@ -1,4 +1,5 @@
 import AppKit
+import FerryKit
 import Foundation
 import Observation
 
@@ -13,6 +14,11 @@ final class EditWatcher {
         var lastUploaded: Date?
         /// 変更を検知したが、書き込み途中かもしれないので次の確認まで待っている
         var pendingSince: Date?
+        /// 開いたとき（自分がアップロードした後は、その後）のサーバーのサイズと更新日時。
+        /// 保存したときに比べて、他の人がサーバー側で変えていないかを調べる。nil なら分からない（調べずにアップロードする）
+        var baseline: RemoteFileStamp?
+        /// サーバーのファイルの権限（一時ファイルから置き換えた後に戻す）
+        var permissions: String?
 
         var name: String { localURL.lastPathComponent }
     }
@@ -20,29 +26,50 @@ final class EditWatcher {
     private(set) var files: [EditedFile] = []
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private let onSave: (EditedFile) -> Void
+    /// 監視をやめたとき（そのファイルの上書きの確認を取り下げる）。引数はサーバーのパス
+    @ObservationIgnored var onStop: ((String) -> Void)?
 
     init(onSave: @escaping (EditedFile) -> Void) {
         self.onSave = onSave
     }
 
-    func watch(_ localURL: URL, remotePath: String) {
+    func watch(_ localURL: URL, remotePath: String, baseline: RemoteFileStamp?, permissions: String?) {
         files.removeAll { $0.remotePath == remotePath }
-        files.append(EditedFile(remotePath: remotePath, localURL: localURL, lastModified: modificationDate(localURL)))
+        files.append(EditedFile(remotePath: remotePath, localURL: localURL, lastModified: modificationDate(localURL),
+                                baseline: baseline, permissions: permissions))
         startTimerIfNeeded()
     }
 
+    func file(for remotePath: String) -> EditedFile? {
+        files.first { $0.remotePath == remotePath }
+    }
+
+    /// アップロードできたら、基準をアップロードした後のサーバーの値にする（自分のアップロードを次の保存で「変更された」とみなさない）
+    func uploaded(_ remotePath: String, baseline: RemoteFileStamp?, permissions: String?) {
+        guard let index = files.firstIndex(where: { $0.remotePath == remotePath }) else { return }
+        files[index].lastUploaded = Date()
+        files[index].baseline = baseline
+        if let permissions {
+            files[index].permissions = permissions
+        }
+    }
+
     func stop(_ id: EditedFile.ID) {
+        let stopped = files.filter { $0.id == id }
         files.removeAll { $0.id == id }
         if files.isEmpty {
             timer?.invalidate()
             timer = nil
         }
+        stopped.forEach { onStop?($0.remotePath) }
     }
 
     func stopAll() {
+        let stopped = files
         files.removeAll()
         timer?.invalidate()
         timer = nil
+        stopped.forEach { onStop?($0.remotePath) }
     }
 
     private func startTimerIfNeeded() {
@@ -61,7 +88,6 @@ final class EditWatcher {
                 if modified == pending {
                     files[index].pendingSince = nil
                     files[index].lastModified = modified
-                    files[index].lastUploaded = Date()
                     onSave(files[index])
                 } else {
                     files[index].pendingSince = modified

@@ -52,34 +52,7 @@ public final class RemoteClient: @unchecked Sendable {
     }
 
     public func list(_ directory: String) async throws -> [RemoteItem] {
-        try await run { handle in
-            if self.server.serverProtocol.isFTPFamily, self.supportsMLSD {
-                do {
-                    return ListingParser.parseMLSD(try self.fetchListing(handle, directory, command: "MLSD"),
-                                                   directory: directory)
-                } catch let error as FerryError where error.kind == .other {
-                    self.supportsMLSD = false
-                    handle.reset()
-                    self.configure(handle)
-                }
-            }
-            if self.server.serverProtocol.isFTPFamily, self.supportsListAll {
-                do {
-                    let items = ListingParser.parseUnixListing(
-                        try self.fetchListing(handle, directory, command: "LIST -a"), directory: directory)
-                    // -a をパスとして解釈して空を返すサーバーもあるので、空のときは LIST で取り直す
-                    if !items.isEmpty { return items }
-                    handle.reset()
-                    self.configure(handle)
-                } catch let error as FerryError where error.kind == .other {
-                    self.supportsListAll = false
-                    handle.reset()
-                    self.configure(handle)
-                }
-            }
-            return ListingParser.parseUnixListing(try self.fetchListing(handle, directory, command: nil),
-                                                  directory: directory)
-        }
+        try await run { handle in try self.list(directory, handle: handle) }
     }
 
     /// modified … サーバー側の更新日時。分かっていればダウンロードしたファイルの更新日時をそれに揃える
@@ -119,31 +92,53 @@ public final class RemoteClient: @unchecked Sendable {
     }
 
     /// アップロード先のフォルダが無ければ作成する。終わったらサーバー側の更新日時をローカルのファイルに揃える。
-    public func upload(_ localURL: URL, to remotePath: String, progress: Progress? = nil) async throws {
+    /// replacingExisting … アップロード先に同名のファイルがあると分かっているとき true。同じフォルダの一時的な名前
+    /// （`.<名前>.ferrypart`）へ送ってから置き換える（途中で切れても、書きかけのファイルで元のファイルを壊さない）。
+    /// permissions … 置き換える前のファイルの権限（"rw-r--r--" 形式）。置き換えると既定の権限になるので、後で同じ権限に戻す
+    public func upload(_ localURL: URL, to remotePath: String, replacingExisting: Bool = false,
+                       permissions: String? = nil, progress: Progress? = nil) async throws {
         let cancel = CancelFlag()
         try await withTaskCancellationHandler {
             try await run { handle in
-                let input = try FileHandle(forReadingFrom: localURL)
-                defer { try? input.close() }
                 let attributes = try FileManager.default.attributesOfItem(atPath: localURL.path)
                 let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-
-                let context = TransferContext(cancel: cancel, progress: progress, expectedTotal: size)
-                context.input = input
-                handle.set(CURLOPT_URL, self.url(for: remotePath, directory: false))
-                handle.set(CURLOPT_UPLOAD, true)
-                handle.set(CURLOPT_INFILESIZE_LARGE, offset: curl_off_t(size))
-                handle.set(CURLOPT_FTP_CREATE_MISSING_DIRS, Int(CURLFTP_CREATE_DIR_RETRY))
-                // フルパスで 1 回だけ CWD すると、無いフォルダの MKD もフルパスで 1 回しか送らず、
-                // 2 段以上の新しいフォルダを作れない。アップロードは階層ごとに CWD する
-                handle.set(CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_MULTICWD)
-                handle.set(CURLOPT_NEW_FILE_PERMS, 0o644)
-                handle.set(CURLOPT_NEW_DIRECTORY_PERMS, 0o755)
-                let quote = self.attach(context, to: handle, isUpload: true)
-                let postQuote = (attributes[.modificationDate] as? Date).map {
-                    self.setModifiedCommand(remotePath, to: $0, handle: handle)
+                let modified = attributes[.modificationDate] as? Date
+                func sendDirectly() throws {
+                    try self.send(localURL, size: size, to: remotePath, handle: handle, cancel: cancel,
+                                  progress: progress, filePermissions: 0o644,
+                                  postQuote: modified.map { [self.setModifiedCommand(remotePath, to: $0)] } ?? [])
                 }
-                try withExtendedLifetime((context, quote, postQuote)) { try handle.perform() }
+                guard replacingExisting else { return try sendDirectly() }
+
+                let temporaryPath = RemotePath.join(RemotePath.parent(of: remotePath),
+                                                    RemotePath.temporaryName(for: RemotePath.name(of: remotePath)))
+                let mode = permissions.flatMap(FilePermissions.octal)
+                do {
+                    // SFTP は作成時の権限を指定できる。600 の wp-config.php などを一時ファイルの間だけ 644 にしない
+                    let filePermissions = mode.flatMap { Int($0, radix: 8) }.map { $0 & 0o777 | 0o600 } ?? 0o644
+                    try self.send(localURL, size: size, to: temporaryPath, handle: handle, cancel: cancel,
+                                  progress: progress, filePermissions: filePermissions, postQuote: [])
+                } catch {
+                    // 中止・失敗したら書きかけの一時ファイルを残さない（元のファイルには触れていない）
+                    try? self.sendCommands([self.deleteCommand(temporaryPath, ignoringFailure: true)], handle: handle)
+                    // フォルダに新しいファイルを作る権限は無いが、既存のファイルは書き換えられるサーバーがある。
+                    // 権限エラーは送り始める前に出るので、今までどおり直接上書きする。途中で切れたなどの失敗では直接送らない
+                    guard !cancel.isCancelled, (error as? FerryError)?.kind == .permissionDenied else { throw error }
+                    return try sendDirectly()
+                }
+                try self.replace(remotePath, with: temporaryPath, size: size, handle: handle)
+
+                // 権限と更新日時は置き換えた後の名前に付ける。どちらも失敗は無視する
+                var after: [String] = []
+                if let mode {
+                    after.append(self.chmodCommand(remotePath, mode: mode, ignoringFailure: true))
+                }
+                if let modified {
+                    after.append(self.setModifiedCommand(remotePath, to: modified))
+                }
+                if !after.isEmpty {
+                    try? self.sendCommands(after, handle: handle)
+                }
             }
         } onCancel: {
             cancel.cancel()
@@ -155,7 +150,7 @@ public final class RemoteClient: @unchecked Sendable {
     }
 
     public func deleteFile(_ path: String) async throws {
-        try await execute(server.serverProtocol.isFTPFamily ? ["DELE \(path)"] : ["rm \(sftpQuoted(path))"])
+        try await execute([deleteCommand(path, ignoringFailure: false)])
     }
 
     /// 空のフォルダを削除する。中身ごと消す場合は deleteRecursively を使う。
@@ -172,16 +167,12 @@ public final class RemoteClient: @unchecked Sendable {
     }
 
     public func rename(_ from: String, to: String) async throws {
-        try await execute(server.serverProtocol.isFTPFamily
-            ? ["RNFR \(from)", "RNTO \(to)"]
-            : ["rename \(sftpQuoted(from)) \(sftpQuoted(to))"])
+        try await execute(renameCommands(from, to: to))
     }
 
     /// mode は "755" のような 8 進数の文字列
     public func changePermissions(_ path: String, mode: String) async throws {
-        try await execute(server.serverProtocol.isFTPFamily
-            ? ["SITE CHMOD \(mode) \(path)"]
-            : ["chmod \(mode) \(sftpQuoted(path))"])
+        try await execute([chmodCommand(path, mode: mode, ignoringFailure: false)])
     }
 
     // MARK: - 内部処理
@@ -200,6 +191,122 @@ public final class RemoteClient: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// 一覧を取る（キューの中から、設定を初期化したハンドルで呼ぶ）。MLSD・LIST -a に対応していなければ LIST に切り替える
+    private func list(_ directory: String, handle: CurlHandle) throws -> [RemoteItem] {
+        if server.serverProtocol.isFTPFamily, supportsMLSD {
+            do {
+                return ListingParser.parseMLSD(try fetchListing(handle, directory, command: "MLSD"), directory: directory)
+            } catch let error as FerryError where error.kind == .other {
+                supportsMLSD = false
+                handle.reset()
+                configure(handle)
+            }
+        }
+        if server.serverProtocol.isFTPFamily, supportsListAll {
+            do {
+                let items = ListingParser.parseUnixListing(
+                    try fetchListing(handle, directory, command: "LIST -a"), directory: directory)
+                // -a をパスとして解釈して空を返すサーバーもあるので、空のときは LIST で取り直す
+                if !items.isEmpty { return items }
+                handle.reset()
+                configure(handle)
+            } catch let error as FerryError where error.kind == .other {
+                supportsListAll = false
+                handle.reset()
+                configure(handle)
+            }
+        }
+        return ListingParser.parseUnixListing(try fetchListing(handle, directory, command: nil), directory: directory)
+    }
+
+    /// 1 ファイルを送る（キューの中から呼ぶ）。filePermissions は SFTP で新しく作るファイルの権限
+    private func send(_ localURL: URL, size: Int64, to remotePath: String, handle: CurlHandle, cancel: CancelFlag,
+                      progress: Progress?, filePermissions: Int, postQuote: [String]) throws {
+        // 前のコマンドの設定（解放済みのコマンドの一覧）が残らないよう初期化する
+        handle.reset()
+        configure(handle)
+        let input = try FileHandle(forReadingFrom: localURL)
+        defer { try? input.close() }
+
+        let context = TransferContext(cancel: cancel, progress: progress, expectedTotal: size)
+        context.input = input
+        handle.set(CURLOPT_URL, url(for: remotePath, directory: false))
+        handle.set(CURLOPT_UPLOAD, true)
+        handle.set(CURLOPT_INFILESIZE_LARGE, offset: curl_off_t(size))
+        handle.set(CURLOPT_FTP_CREATE_MISSING_DIRS, Int(CURLFTP_CREATE_DIR_RETRY))
+        // フルパスで 1 回だけ CWD すると、無いフォルダの MKD もフルパスで 1 回しか送らず、
+        // 2 段以上の新しいフォルダを作れない。アップロードは階層ごとに CWD する
+        handle.set(CURLOPT_FTP_FILEMETHOD, CURLFTPMETHOD_MULTICWD)
+        handle.set(CURLOPT_NEW_FILE_PERMS, filePermissions)
+        handle.set(CURLOPT_NEW_DIRECTORY_PERMS, 0o755)
+        let quote = attach(context, to: handle, isUpload: true)
+        let post = postQuote.isEmpty ? nil : CurlStringList(postQuote)
+        if let post {
+            handle.set(CURLOPT_POSTQUOTE, pointer: UnsafeMutableRawPointer(post.raw))
+        }
+        try withExtendedLifetime((context, quote, post)) { try handle.perform() }
+    }
+
+    /// 一時ファイルを元の名前に置き換える。置き換え先があると名前の変更が失敗するサーバー（OpenSSH の SFTP、IIS の FTP など）では、
+    /// 一時ファイルが全部届いていることを一覧で確かめてから元のファイルを削除し、もう一度名前を変える。
+    /// 元のファイルを消す前に失敗したら一時ファイルを消す。消した後に失敗したら、アップロードした内容は一時ファイルにしか無いので残す
+    private func replace(_ remotePath: String, with temporaryPath: String, size: Int64, handle: CurlHandle) throws {
+        let renameError: Error
+        do {
+            try sendCommands(renameCommands(temporaryPath, to: remotePath), handle: handle)
+            return
+        } catch {
+            renameError = error
+        }
+
+        let temporaryName = RemotePath.name(of: temporaryPath)
+        // 前のコマンドの設定（解放済みのコマンドの一覧）が残っていると libcurl が落ちるので、初期化してから一覧を取る
+        handle.reset()
+        configure(handle)
+        let uploaded = (try? list(RemotePath.parent(of: remotePath), handle: handle))?
+            .first { $0.name == temporaryName && $0.kind == .file }
+        guard let uploaded, uploaded.size == nil || uploaded.size == size else {
+            try? sendCommands([deleteCommand(temporaryPath, ignoringFailure: true)], handle: handle)
+            throw Self.replaceError("アップロードしたファイルを元の名前に置き換えられませんでした（元のファイルはそのままです）",
+                                    renameError)
+        }
+        do {
+            try sendCommands([deleteCommand(remotePath, ignoringFailure: false)], handle: handle)
+        } catch {
+            try? sendCommands([deleteCommand(temporaryPath, ignoringFailure: true)], handle: handle)
+            throw Self.replaceError("元のファイルを置き換えられませんでした（元のファイルはそのままです）", error)
+        }
+        do {
+            try sendCommands(renameCommands(temporaryPath, to: remotePath), handle: handle)
+        } catch {
+            throw Self.replaceError("元のファイルを削除した後、名前を変えられませんでした。"
+                                    + "アップロードした内容はサーバーの「\(temporaryName)」に残っています", error)
+        }
+    }
+
+    private static func replaceError(_ message: String, _ underlying: Error) -> FerryError {
+        let ferryError = underlying as? FerryError
+        return FerryError(kind: ferryError?.kind ?? .other, message: message,
+                          detail: ferryError?.errorDescription ?? underlying.localizedDescription)
+    }
+
+    // コマンドの組み立て。ignoringFailure なら先頭の * で失敗を無視させる。パスは絶対パス
+
+    private func renameCommands(_ from: String, to: String) -> [String] {
+        server.serverProtocol.isFTPFamily
+            ? ["RNFR \(from)", "RNTO \(to)"]
+            : ["rename \(sftpQuoted(from)) \(sftpQuoted(to))"]
+    }
+
+    private func deleteCommand(_ path: String, ignoringFailure: Bool) -> String {
+        (ignoringFailure ? "*" : "") + (server.serverProtocol.isFTPFamily ? "DELE \(path)" : "rm \(sftpQuoted(path))")
+    }
+
+    private func chmodCommand(_ path: String, mode: String, ignoringFailure: Bool) -> String {
+        (ignoringFailure ? "*" : "")
+            + (server.serverProtocol.isFTPFamily ? "SITE CHMOD \(mode) \(path)" : "chmod \(mode) \(sftpQuoted(path))")
     }
 
     private func configure(_ handle: CurlHandle) {
@@ -289,16 +396,13 @@ public final class RemoteClient: @unchecked Sendable {
         return list
     }
 
-    /// アップロード後に更新日時を設定するコマンド。先頭の * で失敗を無視する（非対応のサーバーでは何も起きない）。
-    /// アップロードは階層ごとに CWD した後なので、パスは絶対パスで渡す。戻り値は perform が終わるまで保持すること。
-    private func setModifiedCommand(_ remotePath: String, to date: Date, handle: CurlHandle) -> CurlStringList {
-        let command = server.serverProtocol.isFTPFamily
+    /// 更新日時を設定するコマンド。先頭の * で失敗を無視する（非対応のサーバーでは何も起きない）。
+    /// アップロードは階層ごとに CWD した後なので、パスは絶対パスで渡す
+    private func setModifiedCommand(_ remotePath: String, to date: Date) -> String {
+        server.serverProtocol.isFTPFamily
             ? "*MFMT \(Self.mfmtFormatter.string(from: date)) \(remotePath)"
             // libcurl の SFTP の mtime。日時は curl_getdate が読める形で、空白を含むので引用符で囲む
             : "*mtime \"\(Self.sftpDateFormatter.string(from: date))\" \(sftpQuoted(remotePath))"
-        let list = CurlStringList([command])
-        handle.set(CURLOPT_POSTQUOTE, pointer: UnsafeMutableRawPointer(list.raw))
-        return list
     }
 
     private static let mfmtFormatter: DateFormatter = {
@@ -318,17 +422,22 @@ public final class RemoteClient: @unchecked Sendable {
     }()
 
     private func execute(_ commands: [String]) async throws {
-        try await run { handle in
-            var all = commands
-            if self.server.serverProtocol.isFTPFamily {
-                all.insert("*OPTS UTF8 ON", at: 0)
-            }
-            let list = CurlStringList(all)
-            handle.set(CURLOPT_URL, self.url(for: "/", directory: true))
-            handle.set(CURLOPT_NOBODY, true)
-            handle.set(CURLOPT_QUOTE, pointer: UnsafeMutableRawPointer(list.raw))
-            try withExtendedLifetime(list) { try handle.perform() }
+        try await run { handle in try self.sendCommands(commands, handle: handle) }
+    }
+
+    /// コマンドだけを送る（キューの中から呼ぶ）。前の転送の設定が残らないよう、設定を初期化してから送る
+    private func sendCommands(_ commands: [String], handle: CurlHandle) throws {
+        handle.reset()
+        configure(handle)
+        var all = commands
+        if server.serverProtocol.isFTPFamily {
+            all.insert("*OPTS UTF8 ON", at: 0)
         }
+        let list = CurlStringList(all)
+        handle.set(CURLOPT_URL, url(for: "/", directory: true))
+        handle.set(CURLOPT_NOBODY, true)
+        handle.set(CURLOPT_QUOTE, pointer: UnsafeMutableRawPointer(list.raw))
+        try withExtendedLifetime(list) { try handle.perform() }
     }
 
     private var baseURL: String {

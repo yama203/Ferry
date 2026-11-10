@@ -14,6 +14,8 @@ struct SettingsView: View {
                 .tabItem { Label("パスワード同期", systemImage: "key.icloud") }
             SharedPasswordSettings()
                 .tabItem { Label("会社のパスワード", systemImage: "person.badge.key") }
+            TransferSettings()
+                .tabItem { Label("転送", systemImage: "arrow.up.arrow.down") }
             ExcludeSettings()
                 .tabItem { Label("除外", systemImage: "line.3.horizontal.decrease.circle") }
             EditorSettings()
@@ -22,6 +24,34 @@ struct SettingsView: View {
                 .tabItem { Label("通知", systemImage: "bell") }
         }
         .frame(width: 520, height: 440)
+    }
+}
+
+/// 転送のしかた（Mac ごとの設定）。変えると次に始まる転送から効く
+private struct TransferSettings: View {
+    @AppStorage(TransferQueue.connectionsKey) private var connections = TransferQueue.defaultConnections
+    @AppStorage(TransferQueue.safeUploadKey) private var safeUpload = true
+
+    var body: some View {
+        Form {
+            Picker("同時に転送する数", selection: $connections) {
+                ForEach(1...4, id: \.self) { Text("\($0)").tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            Text("小さいファイルが多いとき（WordPress のテーマなど）に速くなります。サーバーの同時接続数の上限でつながらないときは、自動で減らします。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle("アップロードは一時ファイルに送ってから置き換える", isOn: $safeUpload)
+                .padding(.top, 8)
+            Text("サーバーにすでにあるファイルを上書きするとき、同じフォルダの「.名前.ferrypart」に送り終えてから置き換えます。途中で切れても、書きかけのファイルでサイトを壊しません。権限（600 の wp-config.php など）は元に戻します。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
     }
 }
 

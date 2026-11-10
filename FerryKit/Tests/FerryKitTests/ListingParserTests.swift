@@ -123,3 +123,52 @@ struct ListingParserTests {
         #expect(sftp.url(for: "/home/u/a b.txt", directory: false) == "sftp://example.com:22/home/u/a%20b.txt")
     }
 }
+
+struct TransferSupportTests {
+    @Test func octalPermissions() {
+        #expect(FilePermissions.octal("rw-------") == "600")
+        #expect(FilePermissions.octal("rwxr-xr-x") == "755")
+        #expect(FilePermissions.octal("rw-r--r--") == "644")
+        #expect(FilePermissions.octal("rwsr-xr-x") == "4755")
+        #expect(FilePermissions.octal("rwSr--r--") == "4644")
+        #expect(FilePermissions.octal("rwxr-sr-x") == "2755")
+        #expect(FilePermissions.octal("rwxrwxrwt") == "1777")
+        #expect(FilePermissions.octal("rwxrwxrwT") == "1776")
+        #expect(FilePermissions.octal("-rw-r--r--") == nil)
+        #expect(FilePermissions.octal("rw-r--r-s") == nil)
+        #expect(FilePermissions.octal("") == nil)
+    }
+
+    @Test func partialNames() {
+        #expect(RemotePath.temporaryName(for: "wp-config.php") == ".wp-config.php.ferrypart")
+        #expect(RemotePath.isPartialFile(".index.php.ferrypart"))
+        #expect(RemotePath.isPartialFile("photo.jpg.ferrypart"))
+        #expect(!RemotePath.isPartialFile("index.php"))
+    }
+
+    @Test func remoteFileStamp() {
+        let opened = Date(timeIntervalSince1970: 1_700_000_000)
+        let file = RemoteItem(name: "style.css", path: "/wp/style.css", kind: .file, size: 100, modified: opened)
+        let baseline = RemoteFileStamp(file)
+        #expect(baseline.change(of: "/wp/style.css", in: [file]) == .unchanged)
+
+        var resized = file
+        resized.size = 101
+        #expect(baseline.change(of: "/wp/style.css", in: [resized]) == .modified)
+
+        var touched = file
+        touched.modified = opened.addingTimeInterval(60)
+        #expect(baseline.change(of: "/wp/style.css", in: [touched]) == .modified)
+
+        let other = RemoteItem(name: "other.css", path: "/wp/other.css", kind: .file, size: 100, modified: opened)
+        #expect(baseline.change(of: "/wp/style.css", in: [other]) == .deleted)
+        #expect(baseline.change(of: "/wp/style.css", in: []) == .deleted)
+
+        let folder = RemoteItem(name: "style.css", path: "/wp/style.css", kind: .directory)
+        #expect(baseline.change(of: "/wp/style.css", in: [folder]) == .deleted)
+
+        // 日時の分からない一覧どうしでも比べられる
+        let unknown = RemoteItem(name: "style.css", path: "/wp/style.css", kind: .file, size: 100)
+        #expect(RemoteFileStamp(unknown).change(of: "/wp/style.css", in: [unknown]) == .unchanged)
+    }
+}

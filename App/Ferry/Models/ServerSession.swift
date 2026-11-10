@@ -4,6 +4,16 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 
+/// エディタで開いた後にサーバー側で変わっていた（または削除されていた）ファイルの、上書きの確認待ち
+struct EditConflict: Identifiable {
+    let id = UUID()
+    let remotePath: String
+    let isDeleted: Bool
+    /// 今のサーバーのファイルの権限（上書きするとき、一時ファイルから置き換えた後に戻す）
+    let permissions: String?
+    var name: String { RemotePath.name(of: remotePath) }
+}
+
 /// 1 つの接続先を開いている間の状態（左右のペイン、転送、編集中のファイル）
 @MainActor @Observable
 final class ServerSession {
@@ -28,7 +38,11 @@ final class ServerSession {
     @ObservationIgnored var pendingBookmark: PaneBookmark?
     /// 編集用にダウンロード中のファイル名
     private(set) var openingForEdit: String?
-    @ObservationIgnored private let transferClient: RemoteClient
+    /// エディタで保存したが、サーバー側で変わっていたのでアップロードせずに確認を待っているもの
+    private(set) var editConflicts: [EditConflict] = []
+    /// サーバー側の確認かアップロードの途中のファイル（サーバーのパス）。この間の保存は終わってからもう一度処理する
+    @ObservationIgnored private var editUploadsInFlight: Set<String> = []
+    @ObservationIgnored private var savedAgainDuringUpload: Set<String> = []
     /// Quick Look のプレビュー用（一覧表示や転送を待たせないよう接続を分ける）
     @ObservationIgnored private let previewClient: RemoteClient
     @ObservationIgnored private var hasPassword: Bool
@@ -44,9 +58,8 @@ final class ServerSession {
         // 一覧用と転送用で接続を分け、転送中でもフォルダを移動できるようにする
         let browseClient = RemoteClient(server: server, password: password)
         remote = BrowserModel(side: .remote, client: browseClient)
-        transferClient = RemoteClient(server: server, password: password)
         previewClient = RemoteClient(server: server, password: password)
-        transfers = TransferQueue(client: transferClient, lister: browseClient, excludeRules: excludeRules)
+        transfers = TransferQueue(server: server, password: password, lister: browseClient, excludeRules: excludeRules)
         transfers.serverName = server.name
         // 秘密鍵はパスフレーズ無しの場合もあるので、パスワード無しでも接続を試す
         hasPassword = password != nil || server.privateKeyPath != nil || server.username == "anonymous"
@@ -64,7 +77,10 @@ final class ServerSession {
             }
         }
         editWatcher = EditWatcher { [weak self] file in
-            self?.uploadEdited(file)
+            self?.editedFileSaved(file)
+        }
+        editWatcher.onStop = { [weak self] remotePath in
+            self?.editConflicts.removeAll { $0.remotePath == remotePath }
         }
     }
 
@@ -73,7 +89,7 @@ final class ServerSession {
         // 画面を開いた後にパスワードが同期されてきた場合に備えて、もう一度探す
         if !hasPassword, let password = Passwords.password(for: server.id) {
             client.setPassword(password)
-            transferClient.setPassword(password)
+            transfers.setPassword(password)
             previewClient.setPassword(password)
             hasPassword = true
         }
@@ -131,7 +147,7 @@ final class ServerSession {
     /// 接続画面で入力されたパスワードで接続する
     func connect(withPassword password: String, save: Bool) async {
         remote.client?.setPassword(password)
-        transferClient.setPassword(password)
+        transfers.setPassword(password)
         previewClient.setPassword(password)
         if save {
             Passwords.setPassword(password, for: server.id)
@@ -154,6 +170,7 @@ final class ServerSession {
     func close() {
         transfers.cancelAll()
         editWatcher.stopAll()
+        editConflicts = []
     }
 
     // MARK: - 転送
@@ -184,27 +201,106 @@ final class ServerSession {
         do {
             try await transfers.downloadAndWait([entry], into: directory)
             let file = directory.appendingPathComponent(entry.name)
-            editWatcher.watch(file, remotePath: entry.path)
+            // 一覧に出ていたサイズと更新日時を、保存したときにサーバー側で変わっていないかを調べる基準にする
+            editConflicts.removeAll { $0.remotePath == entry.path }
+            editWatcher.watch(file, remotePath: entry.path,
+                              baseline: RemoteFileStamp(size: entry.size, modified: entry.modified),
+                              permissions: entry.permissions)
             EditorApp.open(file)
         } catch {
             remote.errorMessage = "編集用のダウンロードに失敗しました: \(error.localizedDescription)"
         }
     }
 
-    /// 保存されたファイルを自動でアップロードする。転送一覧に「失敗」と出るだけでは保存できたと思い込むので、
-    /// 失敗したら通知の設定に関係なく通知し、リモート側にも出す（中止したときは出さない）
-    private func uploadEdited(_ file: EditWatcher.EditedFile) {
-        let item = transfers.uploadEdited(file.localURL, to: file.remotePath)
-        let serverName = server.name
-        Task { [weak self] in
-            await item.waitUntilDone()
-            guard case .failed(let reason) = item.state else { return }
-            let message = "『\(item.name)』をアップロードできませんでした: \(reason)"
-            self?.showEditUploadFailure(message)
-            await Notifier.requestAuthorization()
-            Notifier.post(title: "『\(item.name)』をアップロードできませんでした",
-                          body: serverName.isEmpty ? reason : "\(serverName)：\(reason)")
+    /// エディタで保存された。開いた後に他の人がサーバー側で変えていないかを確かめてからアップロードする
+    private func editedFileSaved(_ file: EditWatcher.EditedFile) {
+        let path = file.remotePath
+        // 確認を出している間の保存は、その答えに任せる（上書きするなら、そのときの最新の中身を送る）。確認を重ねて出さない
+        guard !editConflicts.contains(where: { $0.remotePath == path }) else { return }
+        // 確認やアップロードの途中なら、終わってからもう一度。基準が古いまま比べると、自分のアップロードを「変更」とみなしてしまう
+        guard !editUploadsInFlight.contains(path) else {
+            savedAgainDuringUpload.insert(path)
+            return
         }
+        editUploadsInFlight.insert(path)
+        Task { await processEditedFile(path, overwriting: nil) }
+    }
+
+    /// 上書きの確認の答え
+    func resolve(_ conflict: EditConflict, overwrite: Bool) {
+        editConflicts.removeAll { $0.id == conflict.id }
+        // 「アップロードしない」なら基準はそのまま。次に保存したときにまた確認する
+        guard overwrite, editWatcher.file(for: conflict.remotePath) != nil,
+              !editUploadsInFlight.contains(conflict.remotePath) else { return }
+        editUploadsInFlight.insert(conflict.remotePath)
+        Task { await processEditedFile(conflict.remotePath, overwriting: conflict) }
+    }
+
+    /// overwriting … 確認で「上書きする」を選んだもの（サーバー側を確かめずにアップロードする）
+    private func processEditedFile(_ path: String, overwriting conflict: EditConflict?) async {
+        defer { editUploadsInFlight.remove(path) }
+        var conflict = conflict
+        repeat {
+            savedAgainDuringUpload.remove(path)
+            guard let file = editWatcher.file(for: path) else { return }
+            // 削除されていたものを上書きするときは、新しく作る（一時ファイルを使わず直接送る）
+            let exists = conflict.map { !$0.isDeleted } ?? true
+            var permissions = conflict.map(\.permissions) ?? file.permissions
+            // 一覧を取れなかった（通信エラーなど）ときは、確かめずにアップロードする（確認のために保存を止めない）
+            if conflict == nil, let baseline = file.baseline, let client = remote.client,
+               let listing = try? await client.list(RemotePath.parent(of: path)) {
+                let current = listing.first { $0.name == RemotePath.name(of: path) && !$0.isDirectory }
+                switch baseline.change(of: path, in: listing) {
+                case .unchanged:
+                    permissions = current?.permissions ?? permissions
+                case .modified:
+                    askBeforeOverwriting(path, isDeleted: false, permissions: current?.permissions)
+                    return
+                case .deleted:
+                    askBeforeOverwriting(path, isDeleted: true, permissions: nil)
+                    return
+                }
+            }
+            conflict = nil
+            // 失敗したときは基準をそのままにする（安全なアップロードなら、サーバーのファイルは元のまま）
+            if await uploadEdited(file, exists: exists, permissions: permissions) {
+                await relearnBaseline(path)
+            }
+        } while savedAgainDuringUpload.contains(path)
+    }
+
+    private func askBeforeOverwriting(_ path: String, isDeleted: Bool, permissions: String?) {
+        let conflict = EditConflict(remotePath: path, isDeleted: isDeleted, permissions: permissions)
+        editConflicts.append(conflict)
+        // エディタを見ていて確認に気づかないことがあるので、通知の設定に関係なく知らせる
+        let serverName = server.name
+        let body = "アップロードしていません。Ferry で上書きするかを選んでください。"
+        Task {
+            await Notifier.requestAuthorization()
+            Notifier.post(title: "『\(conflict.name)』はサーバーで\(isDeleted ? "削除" : "変更")されています",
+                          body: serverName.isEmpty ? body : "\(serverName)：\(body)")
+        }
+    }
+
+    /// アップロードした後のサーバーのサイズと更新日時を、次の保存の基準にする。一覧を取れなければ分からないものとする
+    private func relearnBaseline(_ path: String) async {
+        let listing = try? await remote.client?.list(RemotePath.parent(of: path))
+        let current = listing?.first { $0.name == RemotePath.name(of: path) && !$0.isDirectory }
+        editWatcher.uploaded(path, baseline: current.map(RemoteFileStamp.init), permissions: current?.permissions)
+    }
+
+    /// 保存されたファイルを自動でアップロードし、終わるまで待つ。転送一覧に「失敗」と出るだけでは保存できたと思い込むので、
+    /// 失敗したら通知の設定に関係なく通知し、リモート側にも出す（中止したときは出さない）
+    private func uploadEdited(_ file: EditWatcher.EditedFile, exists: Bool, permissions: String?) async -> Bool {
+        let item = transfers.uploadEdited(file.localURL, to: file.remotePath, exists: exists, permissions: permissions)
+        await item.waitUntilDone()
+        guard case .failed(let reason) = item.state else { return item.state == .finished }
+        let message = "『\(item.name)』をアップロードできませんでした: \(reason)"
+        showEditUploadFailure(message)
+        await Notifier.requestAuthorization()
+        Notifier.post(title: "『\(item.name)』をアップロードできませんでした",
+                      body: server.name.isEmpty ? reason : "\(server.name)：\(reason)")
+        return false
     }
 
     /// 再読み込みがこれから（転送の処理中）か途中なら、終わった後にも入れ直す。どちらでもなければ消されることはない

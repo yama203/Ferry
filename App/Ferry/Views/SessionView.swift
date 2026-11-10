@@ -34,6 +34,16 @@ struct SessionView: View {
                 Live { remotePane }
             }
             .frame(minHeight: 280, maxHeight: .infinity)
+            // 転送の上書き確認と同時に出ることがあるので、別のビューに付ける
+            .confirmationDialog(editConflictTitle, isPresented: hasEditConflict,
+                                presenting: session.editConflicts.first) { conflict in
+                Button("上書きする") { session.resolve(conflict, overwrite: true) }
+                Button("アップロードしない", role: .cancel) { session.resolve(conflict, overwrite: false) }
+            } message: { conflict in
+                Text(conflict.isDeleted
+                     ? "上書きすると、エディタの内容でもう一度作ります。"
+                     : "上書きすると、サーバーで変更された内容は失われます。アップロードしない場合も、次に保存したときにもう一度確認します。")
+            }
 
             if !session.transfers.items.isEmpty || session.transfers.isPreparing {
                 TransferListView(queue: session.transfers)
@@ -181,6 +191,15 @@ struct SessionView: View {
 
     private var hasConflict: Binding<Bool> {
         Binding(get: { !session.transfers.pendingConflicts.isEmpty }, set: { _ in })
+    }
+
+    private var hasEditConflict: Binding<Bool> {
+        Binding(get: { !session.editConflicts.isEmpty }, set: { _ in })
+    }
+
+    private var editConflictTitle: String {
+        guard let conflict = session.editConflicts.first else { return "" }
+        return "サーバーの『\(conflict.name)』は、エディタで開いた後に\(conflict.isDeleted ? "削除" : "変更")されています。上書きしますか？"
     }
 
     private var conflictTitle: String {
