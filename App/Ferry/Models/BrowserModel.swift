@@ -29,9 +29,15 @@ final class BrowserModel {
     var showHidden: Bool {
         didSet { if showHidden != oldValue { updateVisibleEntries() } }
     }
+    /// 名前での絞り込み（空白区切りの語をすべて含むもの）。今の一覧の中だけで、別のフォルダへ移ると空にする
+    var filterText = "" {
+        didSet { if NameFilter(filterText) != NameFilter(oldValue) { updateVisibleEntries() } }
+    }
     /// 表示する一覧（フォルダが先、その中で選択中の並び順）。
     /// 選択を変えるたびに並べ替えると重いので、中身や並び順が変わったときだけ作り直す。
     private(set) var visibleEntries: [FileEntry] = []
+    /// 隠しファイルの設定を当てたあと、絞り込む前の件数（「N 項目中 M 項目を表示」の N）
+    private(set) var unfilteredCount = 0
 
     private var history: [String] = []
 
@@ -45,11 +51,21 @@ final class BrowserModel {
     var canGoBack: Bool { !history.isEmpty }
     var canGoUp: Bool { path != "/" && !path.isEmpty }
 
+    var isFiltering: Bool { NameFilter(filterText).isActive }
+
     private func updateVisibleEntries() {
         let shown = showHidden ? entries : entries.filter { !$0.isHidden }
-        let folders = shown.filter(\.isDirectory).sorted(by: isOrderedBefore)
-        let files = shown.filter { !$0.isDirectory }.sorted(by: isOrderedBefore)
+        unfilteredCount = shown.count
+        let filter = NameFilter(filterText)
+        let matched = filter.isActive ? shown.filter { filter.matches($0.name) } : shown
+        let folders = matched.filter(\.isDirectory).sorted(by: isOrderedBefore)
+        let files = matched.filter { !$0.isDirectory }.sorted(by: isOrderedBefore)
         visibleEntries = folders + files
+        // 見えない項目を選んだまま削除・転送しないよう、選択は見えているものだけにする
+        let visibleIDs = Set(visibleEntries.map(\.id))
+        if !selection.isSubset(of: visibleIDs) {
+            selection.formIntersection(visibleIDs)
+        }
     }
 
     private func isOrderedBefore(_ a: FileEntry, _ b: FileEntry) -> Bool {
@@ -66,8 +82,9 @@ final class BrowserModel {
         return ascending ? result == .orderedAscending : result == .orderedDescending
     }
 
+    /// 選択中の項目（表示中のものだけ。選択は updateVisibleEntries で表示中のものに絞っている）
     var selectedEntries: [FileEntry] {
-        entries.filter { selection.contains($0.id) }
+        visibleEntries.filter { selection.contains($0.id) }
     }
 
     /// パンくずリスト用
@@ -93,6 +110,8 @@ final class BrowserModel {
             }
             if path != newPath {
                 selection = []
+                // 絞り込みは開いていたフォルダに対するものなので、移ったら解除する（再読み込みでは残す）
+                filterText = ""
             }
             path = newPath
             entries = loaded

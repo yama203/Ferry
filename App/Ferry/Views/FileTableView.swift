@@ -30,6 +30,10 @@ struct FileTableView: NSViewRepresentable {
     let dropTypes: [NSPasteboard.PasteboardType]
     let onDrop: (NSPasteboard) -> Bool
     @Binding var isDropTargeted: Bool
+    /// 表にフォーカスがあるときの ⌘F（このペインの絞り込みを開く）
+    var onFind: (() -> Void)?
+    /// 値が変わったら表にキーボードのフォーカスを移す（絞り込みの欄から戻るとき）
+    var focusRequest = 0
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -108,6 +112,7 @@ struct FileTableView: NSViewRepresentable {
         private var prefetchTask: Task<Void, Never>?
         private var entries: [FileEntry] = []
         private var isApplyingSelection = false
+        private var focusRequest = 0
 
         init(_ parent: FileTableView) {
             self.parent = parent
@@ -118,7 +123,11 @@ struct FileTableView: NSViewRepresentable {
             guard let table else { return }
             if parent.entries != entries {
                 entries = parent.entries
+                // 行が減ると表が残った行番号のまま選択を通知してくるので、ここでは拾わない
+                // （絞り込みで別の項目が選ばれてしまわないよう、選択は下で parent.selection から当て直す）
+                isApplyingSelection = true
                 table.reloadData()
+                isApplyingSelection = false
             }
             let wanted = IndexSet(entries.indices.filter { parent.selection.contains(entries[$0].id) })
             if wanted != table.selectedRowIndexes {
@@ -126,6 +135,18 @@ struct FileTableView: NSViewRepresentable {
                 table.selectRowIndexes(wanted, byExtendingSelection: false)
                 isApplyingSelection = false
             }
+            if parent.focusRequest != focusRequest {
+                focusRequest = parent.focusRequest
+                // 描画中にフォーカスを動かさない
+                DispatchQueue.main.async { [weak table] in
+                    guard let table else { return }
+                    table.window?.makeFirstResponder(table)
+                }
+            }
+        }
+
+        func find() {
+            parent.onFind?()
         }
 
         func entries(at rows: IndexSet) -> [FileEntry] {
@@ -322,6 +343,18 @@ extension NSUserInterfaceItemIdentifier {
 /// キー操作（削除・Return・スペース）を受け取る表
 final class FerryTableView: NSTableView {
     weak var coordinator: FileTableView.Coordinator?
+
+    /// ⌘F はフォーカスのある表のペインの絞り込みにする。メニューより先に、窓の中のすべての view に回ってくるので、
+    /// フォーカスが無い表は受け取らない（サイドバーなどにフォーカスがあるときは今までどおり）
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self, coordinator?.parent.onFind != nil,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+            coordinator?.find()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {

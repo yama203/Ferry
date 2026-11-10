@@ -32,12 +32,19 @@ struct FileBrowserView: View {
     @State private var deleteTargets: [FileEntry] = []
     @State private var permissionTargets: [FileEntry] = []
     @State private var permissionText = ""
+    @State private var isFilterOpen = false
+    @FocusState private var isFilterFocused: Bool
+    /// 増やすと一覧にフォーカスを戻す（FileTableView.focusRequest）
+    @State private var tableFocusRequest = 0
 
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 header
                 pathBar
+                if isFilterOpen {
+                    filterBar
+                }
             }
             .background(headerBackground)
             Divider()
@@ -45,6 +52,13 @@ struct FileBrowserView: View {
                 .overlay {
                     if model.isLoading && model.entries.isEmpty {
                         ProgressView()
+                    }
+                }
+                .overlay {
+                    if model.isFiltering && model.visibleEntries.isEmpty && !model.isLoading {
+                        ContentUnavailableView("「\(model.filterText.trimmingCharacters(in: .whitespaces))」に合う項目はありません",
+                                               systemImage: "magnifyingglass")
+                            .allowsHitTesting(false)
                     }
                 }
                 .overlay(alignment: .bottom) { errorBanner }
@@ -136,6 +150,13 @@ struct FileBrowserView: View {
                     .help("上の階層へ")
                 Button { Task { await model.refresh() } } label: { Image(systemName: "arrow.clockwise") }
                     .help("再読み込み")
+                Button {
+                    if isFilterOpen { closeFilter() } else { openFilter() }
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(model.isFiltering ? Color.accentColor : .primary)
+                }
+                .help("名前で絞り込む（⌘F）")
                 Menu {
                     Button("新規フォルダ…") { startCreatingFolder() }
                     if let onSync {
@@ -190,6 +211,38 @@ struct FileBrowserView: View {
         }
     }
 
+    /// 名前での絞り込みの欄（今のフォルダの一覧の中だけ。サーバーには問い合わせない）
+    private var filterBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("名前で絞り込む", text: $model.filterText)
+                .textFieldStyle(.plain)
+                .focused($isFilterFocused)
+                // Return で一覧へ（矢印キーで選んでそのまま操作できるように）
+                .onSubmit { tableFocusRequest += 1 }
+                .onExitCommand { closeFilter() }
+            if !model.filterText.isEmpty {
+                Button {
+                    model.filterText = ""
+                    isFilterFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("絞り込みを解除")
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.background, in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+    }
+
     private var table: some View {
         FileTableView(
             entries: model.visibleEntries,
@@ -213,7 +266,9 @@ struct FileBrowserView: View {
             onSelectSingleFile: prefetchPreview,
             dropTypes: dropTypes,
             onDrop: onDrop,
-            isDropTargeted: $isDropTargeted
+            isDropTargeted: $isDropTargeted,
+            onFind: openFilter,
+            focusRequest: tableFocusRequest
         )
     }
 
@@ -326,7 +381,11 @@ struct FileBrowserView: View {
     private var footer: some View {
         HStack {
             let count = model.visibleEntries.count
-            Text(model.selection.isEmpty ? "\(count) 項目" : "\(count) 項目中 \(model.selection.count) 項目を選択")
+            // 絞り込み中は、全体の何件のうちを見ているのかを出す
+            let shown = model.isFiltering ? "\(model.unfilteredCount) 項目中 \(count) 項目を表示" : "\(count) 項目"
+            Text(model.selection.isEmpty ? shown
+                 : model.isFiltering ? "\(shown)、\(model.selection.count) 項目を選択"
+                 : "\(count) 項目中 \(model.selection.count) 項目を選択")
             Spacer()
         }
         .font(.caption)
@@ -369,6 +428,19 @@ struct FileBrowserView: View {
         case .failure(let error):
             model.errorMessage = error.localizedDescription
         }
+    }
+
+    private func openFilter() {
+        isFilterOpen = true
+        // 欄が現れてからフォーカスを移す
+        DispatchQueue.main.async { isFilterFocused = true }
+    }
+
+    /// 絞り込みを解除して欄を閉じ、一覧にフォーカスを戻す
+    private func closeFilter() {
+        model.filterText = ""
+        isFilterOpen = false
+        tableFocusRequest += 1
     }
 
     private func startCreatingFolder() {
