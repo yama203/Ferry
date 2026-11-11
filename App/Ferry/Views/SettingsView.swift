@@ -23,7 +23,8 @@ struct SettingsView: View {
             NotificationSettings()
                 .tabItem { Label("通知", systemImage: "bell") }
         }
-        .frame(width: 520, height: 440)
+        // 幅はツールバーに 8 つのタブが全部並ぶ大きさ（狭いと最後のタブが「≫」の中に隠れる）
+        .frame(width: 620, height: 440)
     }
 }
 
