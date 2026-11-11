@@ -31,7 +31,8 @@
     break-before: page;
   }
   h2 .num { color: var(--blue); margin-right: 3mm; }
-  h3 { font-size: 12.5pt; margin: 7mm 0 2mm; padding-left: 3mm; border-left: 4px solid var(--blue); }
+  /* 見出しだけがページの最後に残らないようにする */
+  h3 { font-size: 12.5pt; margin: 7mm 0 2mm; padding-left: 3mm; border-left: 4px solid var(--blue); break-after: avoid; }
   p { margin: 0 0 3mm; }
   ul, ol { margin: 0 0 3mm; padding-left: 6mm; }
   li { margin-bottom: 1mm; }
@@ -150,7 +151,7 @@
       <li>困ったときの対処</li>
     </ul>
   </div>
-  <div class="date">Ferry for Windows 0.1.8 時点</div>
+  <div class="date">Ferry for Windows 0.1.11 時点</div>
 </section>
 
 <!-- 目次 -->
