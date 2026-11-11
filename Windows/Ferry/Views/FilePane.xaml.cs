@@ -383,7 +383,18 @@ public sealed partial class FilePane : UserControl
         await ViewModel.ChangePermissionsAsync(targets, mode);
     }
 
-    public void FocusList() => List.Focus(FocusState.Programmatic);
+    /// <summary>
+    /// 一覧にフォーカスを移す。ListView そのものに移すと、中の最初のもの（列の見出しのボタン）に行くので、
+    /// 選んでいる行（無ければ先頭の行）に移す。一覧を入れ替えた直後は行がまだ作られていないので、先に配置を済ませる
+    /// </summary>
+    public void FocusList()
+    {
+        List.UpdateLayout();
+        if (List.ContainerFromIndex(Math.Max(List.SelectedIndex, 0)) is ListViewItem item)
+            item.Focus(FocusState.Programmatic);
+        else
+            List.Focus(FocusState.Programmatic);
+    }
 }
 
 /// <summary>エクスプローラーで開いているフォルダ（Shell.Application の Windows）</summary>

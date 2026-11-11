@@ -61,14 +61,15 @@ public sealed partial class VaultPanel : StackPanel
                     AddChangeMasterPassword(vault);
                     break;
                 }
-                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+                // 3 つ並べると設定の画面の幅に収まらないので、変更とやめるの 2 段に分ける
                 var change = new Button { Content = "マスターパスワードを変更…" };
                 change.Click += (_, _) =>
                 {
                     _changing = true;
                     Render();
                 };
-                buttons.Children.Add(change);
+                Children.Add(change);
+                var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
                 var forget = new Button { Content = "この PC で同期をやめる" };
                 ToolTipService.SetToolTip(forget, "この PC ではマスターパスワードを忘れます。他の PC の同期はそのまま続きます。");
                 forget.Click += (_, _) =>

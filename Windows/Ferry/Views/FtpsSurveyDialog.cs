@@ -57,6 +57,8 @@ public static class FtpsSurveyDialog
             CloseButtonText = "閉じる",
             DefaultButton = ContentDialogButton.Primary,
         };
+        // ContentDialog の既定の最大幅（548）では、中身（540）と余白が収まらず右端が切れる
+        dialog.Resources["ContentDialogMaxWidth"] = 640.0;
         // 閉じた後に調べ終わることがあるので Dispose しない
         var cancel = new CancellationTokenSource();
 
